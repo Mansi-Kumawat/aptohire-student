@@ -1,0 +1,23 @@
+# AptoHire Backend Supabase Configuration
+project_id = "aptohire"
+
+[api]
+port = 54321
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+port = 54323
+
+[auth]
+site_url = "http://localhost:5174"
+additional_redirect_urls = ["https://student.aptohire.com", "http://localhost:5174/auth/callback"]
+jwt_expiry = 3600
+enable_signup = true
+
+[storage]
+file_size_limit = "52428800" # 50MB (max video size)

@@ -1,0 +1,110 @@
+@import './tokens.css';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after {
+    border-color: var(--hairline);
+  }
+
+  body {
+    background-color: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    -webkit-tap-highlight-color: transparent;
+    min-height: 100vh;
+  }
+
+  /* Keyboard focus ring - WCAG 2.2 AA compliant */
+  :focus-visible {
+    outline: 2px solid var(--verdant-700);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 4px #ffffff;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    color: var(--ink);
+    letter-spacing: -0.015em;
+  }
+
+  /* Form control font size on mobile to prevent iOS auto-zoom */
+  input, select, textarea {
+    font-size: 16px;
+  }
+
+  /* Bespoke styling for select dropdowns and options */
+  select {
+    color-scheme: light;
+  }
+  select option {
+    background-color: #ffffff;
+    color: #17261e;
+    padding: 10px 14px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  select option:hover,
+  select option:focus,
+  select option:checked {
+    background-color: #e8f3ee;
+    color: #185a3a;
+    font-weight: 600;
+  }
+  select optgroup {
+    font-weight: 700;
+    color: #4f6657;
+    background-color: #f7faf8;
+    padding: 6px 12px;
+  }
+}
+
+@layer utilities {
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bg-dawn {
+    background: var(--grad-dawn);
+  }
+
+  .bg-mesh {
+    background: var(--grad-mesh);
+  }
+
+  .bg-grad-verified {
+    background: var(--grad-verified);
+  }
+
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .safe-left {
+    padding-left: env(safe-area-inset-left, 0px);
+  }
+
+  .safe-right {
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+}
+
+/* Print styles for digital resume */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #17261e !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+}
