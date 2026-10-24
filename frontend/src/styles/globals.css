@@ -35,29 +35,88 @@
     font-size: 16px;
   }
 
-  /* Bespoke styling for select dropdowns and options */
+  /* =========================================================================
+     COMPREHENSIVE MODERN STYLING FOR <select> AND <option> TAGS
+     ========================================================================= */
   select {
     color-scheme: light;
-  }
-  select option {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
     background-color: #ffffff;
     color: #17261e;
-    padding: 10px 14px;
-    font-size: 14px;
+    border: 1.5px solid #dbe2dd;
+    border-radius: 12px;
+    padding: 10px 42px 10px 14px;
+    font-size: 14.5px;
+    font-weight: 500;
     line-height: 1.5;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230b7f49' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 14px center;
+    background-size: 16px 16px;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 1px 2px 0 rgba(23, 38, 30, 0.04);
   }
+
+  select:hover {
+    border-color: #8fe0b2;
+    background-color: #fbfdfc;
+    box-shadow: 0 2px 8px -2px rgba(11, 127, 73, 0.12);
+  }
+
+  select:focus,
+  select:focus-visible {
+    outline: none !important;
+    border-color: #0b7f49 !important;
+    background-color: #ffffff;
+    box-shadow: 0 0 0 3px rgba(11, 127, 73, 0.15) !important;
+  }
+
+  select:disabled {
+    opacity: 0.6;
+    background-color: #f4f6f5;
+    cursor: not-allowed;
+    border-color: #e3e8e5;
+  }
+
+  /* Direct styling for child <option> tags across modern engines */
+  select option {
+    background-color: #ffffff !important;
+    color: #17261e !important;
+    padding: 14px 18px !important;
+    font-size: 14.5px !important;
+    font-weight: 500 !important;
+    line-height: 1.6 !important;
+    min-height: 44px !important;
+    border-radius: 8px !important;
+    margin: 4px 0 !important;
+  }
+
   select option:hover,
-  select option:focus,
-  select option:checked {
-    background-color: #e8f3ee;
-    color: #185a3a;
-    font-weight: 600;
+  select option:focus {
+    background-color: #ecfaf2 !important;
+    color: #0a6139 !important;
+    font-weight: 600 !important;
   }
+
+  select option:checked {
+    background-color: #d2f3e1 !important;
+    color: #0a6139 !important;
+    font-weight: 600 !important;
+  }
+
   select optgroup {
     font-weight: 700;
-    color: #4f6657;
-    background-color: #f7faf8;
-    padding: 6px 12px;
+    color: #0b7f49;
+    background-color: #f6f8f7;
+    padding: 8px 12px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-radius: 6px;
+    margin: 4px 0;
   }
 }
 
@@ -76,6 +135,35 @@
 
   .bg-grad-verified {
     background: var(--grad-verified);
+  }
+
+  /* Modern Glassmorphic panel effect */
+  .glass-panel {
+    background: rgba(255, 255, 255, 0.88);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(227, 232, 229, 0.8);
+  }
+
+  /* Micro-interaction interactive card hover */
+  .interactive-card {
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .interactive-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 25px -5px rgba(23, 38, 30, 0.08), 0 8px 10px -6px rgba(23, 38, 30, 0.04);
+    border-color: rgba(14, 159, 91, 0.35);
+  }
+
+  /* Hide scrollbars while allowing scrolling if needed */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+    width: 0px;
+    height: 0px;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
   }
 
   .safe-top {

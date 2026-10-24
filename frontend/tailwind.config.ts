@@ -36,8 +36,12 @@ const config: Config = {
         feature: 'var(--r-feature)',
       },
       boxShadow: {
+        subtle: '0 1px 3px 0 rgba(23, 38, 30, 0.04), 0 1px 2px -1px rgba(23, 38, 30, 0.04)',
         float: 'var(--shadow-1)',
         modal: 'var(--shadow-2)',
+        'card-hover': '0 8px 30px -4px rgba(23, 38, 30, 0.12), 0 2px 6px -1px rgba(23, 38, 30, 0.06)',
+        'glow-verdant': '0 0 20px -3px rgba(14, 159, 91, 0.25)',
+        'glow-ember': '0 0 20px -3px rgba(255, 122, 26, 0.25)',
       },
       fontFamily: {
         display: ['var(--font-display)', 'system-ui', 'sans-serif'],
@@ -46,11 +50,46 @@ const config: Config = {
       },
       transitionTimingFunction: {
         out: 'var(--ease-out)',
+        spring: 'cubic-bezier(0.16, 1, 0.3, 1)',
       },
       transitionDuration: {
         fast: 'var(--dur-fast)',
         base: 'var(--dur-base)',
         reveal: 'var(--dur-reveal)',
+      },
+      keyframes: {
+        fadeIn: {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
+        slideUp: {
+          '0%': { opacity: '0', transform: 'translateY(8px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        slideDown: {
+          '0%': { opacity: '0', transform: 'translateY(-8px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        scaleIn: {
+          '0%': { opacity: '0', transform: 'scale(0.97)' },
+          '100%': { opacity: '1', transform: 'scale(1)' },
+        },
+        pulseSubtle: {
+          '0%, 100%': { opacity: '1', transform: 'scale(1)' },
+          '50%': { opacity: '0.85', transform: 'scale(1.02)' },
+        },
+        shimmer: {
+          '0%': { backgroundPosition: '-200% 0' },
+          '100%': { backgroundPosition: '200% 0' },
+        },
+      },
+      animation: {
+        fadeIn: 'fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+        slideUp: 'slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+        slideDown: 'slideDown 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+        scaleIn: 'scaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+        pulseSubtle: 'pulseSubtle 3s infinite ease-in-out',
+        shimmer: 'shimmer 2.5s infinite linear',
       },
     },
   },

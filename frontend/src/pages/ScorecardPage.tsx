@@ -133,7 +133,7 @@ export const ScorecardPage: React.FC = () => {
                         <Link
                           key={score.id}
                           to={`/scorecard/${score.skill_slug}`}
-                          className="p-5 rounded-panel border border-hairline bg-canvas hover:border-verdant-600 transition-all flex items-center justify-between group shadow-sm"
+                          className="p-5 rounded-panel border border-hairline bg-canvas hover:border-verdant-400 hover:shadow-card-hover hover:-translate-y-1 transition-all duration-200 flex items-center justify-between group shadow-subtle"
                         >
                           <div className="flex items-center gap-4">
                             <ProofRing

@@ -3,6 +3,7 @@ import { AuthUser } from '@/lib/backend/types';
 import { NotificationItem } from '@/lib/domain/types';
 import { NotificationBell } from './NotificationBell';
 import { AccountMenu } from './AccountMenu';
+import { QuickActionsMenu } from './QuickActionsMenu';
 import { Menu, X } from 'lucide-react';
 import { Logo } from '../brand/Logo';
 import { Link } from 'react-router-dom';
@@ -29,8 +30,13 @@ export const TopBar: React.FC<TopBarProps> = ({
   onToggleDrawer,
 }) => {
   return (
-    <header className="sticky top-0 z-30 w-full h-14 bg-dawn border-b border-hairline safe-top select-none">
-      <div className="h-full px-3 sm:px-6 flex items-center justify-between">
+    <header
+      className="sticky top-0 z-30 w-full h-14 border-b border-hairline/80 safe-top select-none transition-all shadow-2xs"
+      style={{
+        background: 'linear-gradient(90deg, #e8f9ef 0%, #ffffff 42%, #fff1e0 100%)',
+      }}
+    >
+      <div className="h-full px-4 sm:px-7 lg:px-9 flex items-center justify-between">
         {/* Left: Drawer toggle on mobile & tablet (< 1024px) + Logo */}
         <div className="flex items-center gap-2">
           {/* Hamburger button visible on ALL screens < 1024px */}
@@ -56,8 +62,10 @@ export const TopBar: React.FC<TopBarProps> = ({
           </div>
         </div>
 
-        {/* Right side: Notifications bell & AccountMenu */}
-        <div className="flex items-center gap-1.5 sm:gap-3">
+        {/* Right side: QuickActionsMenu + Notifications bell & AccountMenu */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          <QuickActionsMenu />
+
           <NotificationBell
             notifications={notifications}
             onMarkRead={onMarkNotificationRead}

@@ -50,16 +50,19 @@ export const SideRail: React.FC<SideRailProps> = ({
   return (
     <aside
       className={cn(
-        'h-full flex flex-col justify-between bg-canvas border-r border-hairline py-4 select-none transition-all duration-200',
-        collapsed ? 'w-[72px] px-2 items-center' : 'w-[240px] px-3.5',
+        'h-full flex flex-col justify-between bg-canvas border-r border-hairline py-4 select-none transition-all duration-200 overflow-hidden',
+        collapsed ? 'w-[72px] px-2 items-center' : 'w-full lg:w-[240px] px-3.5 sm:px-4',
         className
       )}
     >
-      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
+      <div
+        className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden no-scrollbar"
+        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+      >
         {/* Header: Logo and optional Drawer Close button */}
         <div
           className={cn(
-            'mb-6 px-1.5 flex items-center justify-between shrink-0',
+            'mb-6 px-1 flex items-center justify-between shrink-0 gap-2 min-w-0 overflow-hidden',
             collapsed && 'justify-center px-0'
           )}
         >
@@ -67,7 +70,7 @@ export const SideRail: React.FC<SideRailProps> = ({
             to="/"
             onClick={onNavigate}
             aria-label="AptoHire Home"
-            className="flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-verdant-600 rounded-control"
+            className="flex items-center min-w-0 shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-verdant-600 rounded-control overflow-hidden"
           >
             <Logo showPortalBadge={!collapsed} collapsed={collapsed} />
           </NavLink>
@@ -77,7 +80,7 @@ export const SideRail: React.FC<SideRailProps> = ({
               type="button"
               onClick={onClose}
               aria-label="Close navigation drawer"
-              className="w-9 h-9 rounded-control flex items-center justify-center text-moss hover:text-ink hover:bg-mist transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-verdant-600 lg:hidden"
+              className="w-9 h-9 shrink-0 rounded-control flex items-center justify-center text-moss hover:text-ink hover:bg-mist transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-verdant-600 lg:hidden"
             >
               <X className="w-5 h-5 stroke-[1.75]" />
             </button>
@@ -85,7 +88,7 @@ export const SideRail: React.FC<SideRailProps> = ({
         </div>
 
         {/* Main Nav items */}
-        <nav className="space-y-1 flex-1" aria-label="Main Navigation">
+        <nav className="space-y-1 flex-1 overflow-x-hidden" aria-label="Main Navigation">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             return (
@@ -96,7 +99,7 @@ export const SideRail: React.FC<SideRailProps> = ({
                 onClick={onNavigate}
                 className={({ isActive }) =>
                   cn(
-                    'relative flex items-center gap-3 px-3 py-2.5 rounded-control text-[14px] font-medium transition-colors min-h-[44px]',
+                    'relative flex items-center gap-3 px-3 py-2.5 rounded-control text-[14px] font-medium transition-colors min-h-[44px] overflow-hidden',
                     isActive
                       ? 'bg-verdant-50 text-verdant-800 font-semibold'
                       : 'text-moss hover:text-ink hover:bg-mist',
@@ -125,7 +128,7 @@ export const SideRail: React.FC<SideRailProps> = ({
       </div>
 
       {/* Rail footer */}
-      <div className="pt-3 mt-2 border-t border-hairline space-y-1 shrink-0">
+      <div className="pt-3 mt-2 border-t border-hairline space-y-1 shrink-0 overflow-x-hidden">
         <NavLink
           to="/help"
           onClick={onNavigate}

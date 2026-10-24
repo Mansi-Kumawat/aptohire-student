@@ -77,7 +77,7 @@ export const AppShell: React.FC<AppShellProps> = ({
 
       <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* Desktop Permanent Side Rail (>= 1024px) */}
-        <div className="hidden lg:block shrink-0 h-full">
+        <div className="hidden lg:block shrink-0 h-full overflow-hidden">
           <SideRail
             collapsed={isRailCollapsed}
             onToggleCollapse={() => setIsRailCollapsed(!isRailCollapsed)}
@@ -132,7 +132,7 @@ export const AppShell: React.FC<AppShellProps> = ({
           <main
             id="main-content"
             tabIndex={-1}
-            className="flex-1 w-full max-w-[1200px] mx-auto p-4 sm:p-6 lg:p-8 pb-20 md:pb-8 focus:outline-none"
+            className="flex-1 w-full max-w-[1240px] mx-auto px-4 sm:px-7 lg:px-9 py-6 sm:py-8 pb-24 md:pb-12 focus:outline-none"
           >
             <Outlet />
           </main>
