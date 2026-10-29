@@ -226,6 +226,17 @@ export const ProfilePage: React.FC = () => {
 
   const verifiedScores = scores.filter((s) => s.is_verified && !s.is_borderline);
 
+  const displayedSources: ProfileSource[] = sources.some((item) => item.source === 'github')
+    ? sources
+    : [...sources, {
+        id: 'github-connect-card',
+        source: 'github',
+        name: 'GitHub',
+        connected: false,
+        consent_granted: false,
+        auto_approve_proposals: false,
+      }];
+
   return (
     <div className="max-w-4xl mx-auto space-y-6 antialiased pb-16">
       <Helmet>
@@ -558,8 +569,7 @@ export const ProfilePage: React.FC = () => {
             </div>
 
             <div className="space-y-4">
-              {sources.map((source) => (
-                <div
+            {displayedSources.map((source) => (                <div
                   key={source.id}
                   className="p-4 rounded-control border border-hairline bg-mist/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                 >
@@ -570,8 +580,8 @@ export const ProfilePage: React.FC = () => {
                       {source.source === 'manual' && <LinkIcon className="w-4 h-4 text-moss" />}
                       <span className="font-semibold text-sm text-ink">{source.name}</span>
                       <StatusChip
-                        kind={source.connected ? 'verified' : 'declined'}
-                        label={source.connected ? 'Connected' : 'Disconnected'}
+                        kind={source.consent_granted ? 'verified' : 'declined'}
+                        label={source.consent_granted ? 'Consent recorded' : 'Not connected'}
                       />
                     </div>
                     {source.last_synced_at && (
@@ -582,38 +592,65 @@ export const ProfilePage: React.FC = () => {
                   </div>
 
                   <div className="flex items-center gap-4">
-                    <Switch
-                      checked={source.consent_granted}
-                      onChange={async (checked) => {
-                        if (!user) return;
-                        await backend.sources.updateSourceConsent(user.id, source.id, checked);
-                        loadAll();
-                      }}
-                      label="Consent"
-                    />
+                    <span className="text-xs text-moss">
+                      {source.consent_granted ? 'Consent recorded' : 'Consent requested during authorization'}
+                    </span>
 
-                    {source.connected ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setDisconnectSourceId(source.id)}
-                        className="text-xs text-danger-600 hover:bg-danger-50"
-                      >
-                        Disconnect
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={async () => {
-                          if (!user) return;
-                          await backend.sources.syncSource(user.id, source.source);
-                          loadAll();
-                          toast.success(`Connected to ${source.name}.`);
-                        }}
-                      >
-                        Connect
-                      </Button>
+                    {source.source === 'github' && (
+                      <>
+                        {source.consent_granted && source.id !== 'github-connect-card' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={async () => {
+                              if (!user) return;
+                              try {
+                                const result = await backend.sources.syncSource(
+                                  user.id,
+                                  'github',
+                                  { source_id: source.id }
+                                );
+                                if (result.proposals?.length) {
+                                  toast.success('GitHub sync complete. Review the suggested profile updates.');
+                                } else {
+                                  toast.success('GitHub sync complete.');
+                                }
+                                await loadAll();
+                              } catch (error) {
+                                toast.error(error instanceof Error ? error.message : 'GitHub sync failed.');
+                              }
+                            }}
+                          >
+                            Sync
+                          </Button>
+                        )}
+
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={async () => {
+                            if (!user) return;
+                            try {
+                              await backend.sources.syncSource(user.id, 'github');
+                            } catch (error) {
+                              toast.error(error instanceof Error ? error.message : 'GitHub authorization could not start.');
+                            }
+                          }}
+                        >
+                          {source.consent_granted ? 'Authorize / reconnect' : 'Connect GitHub'}
+                        </Button>
+
+                        {source.consent_granted && source.id !== 'github-connect-card' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setDisconnectSourceId(source.id)}
+                            className="text-xs text-danger-600 hover:bg-danger-50"
+                          >
+                            Disconnect
+                          </Button>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
