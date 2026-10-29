@@ -176,6 +176,9 @@ export const ProfilePage: React.FC = () => {
   // Add Affiliation
   const handleAddAffiliation = async () => {
     if (!user) return;
+    const submittedStudentIdNumber = studentIdInput;
+    // Raw student IDs must not remain in component state after submission.
+    setStudentIdInput('');
     try {
       await backend.affiliations.confirmAffiliation({
         student_id: user.id,
@@ -185,7 +188,7 @@ export const ProfilePage: React.FC = () => {
             addUniType === 'unregistered'
               ? unregisteredUniName
               : universities.find((u) => u.id === selectedUniId)?.name,
-          student_id_number: studentIdInput || undefined,
+          student_id_number: submittedStudentIdNumber || undefined,
           program_level: programLevel,
           year: yearNumber,
           status: uniStatus,

@@ -57,6 +57,27 @@ export const registerStudentSchema = z.object({
 });
 export type RegisterStudentInput = z.input<typeof registerStudentSchema>;
 
+export const publicVerifyResponseSchema = z.object({
+  credential: z.object({
+    credential_id: z.string().regex(/^[a-f0-9]{18}$/),
+    issued_at: z.string(),
+    last_updated: z.string(),
+    display_name: z.string().optional(),
+    affiliation: z.object({
+      label: z.string(),
+      verification: z.enum(['roster', 'student_id', 'unverified']),
+    }).optional(),
+    skills: z.array(z.object({
+      name: z.string(),
+      level: z.string(),
+      verified: z.boolean(),
+      score: z.number().min(0).max(100).optional(),
+      verified_on: z.string().optional(),
+    })),
+    shared_fields: z.array(z.string()),
+  }),
+});
+
 export const submissionFormSchema = z.object({
   title: z
     .string()

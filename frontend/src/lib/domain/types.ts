@@ -320,7 +320,7 @@ export interface PublicCredential {
   skills: {
     name: string;
     level: string;
-    verified: true;
+    verified: boolean;
     score?: number;
     verified_on?: string;
   }[];

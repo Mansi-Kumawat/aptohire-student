@@ -94,6 +94,9 @@ export const OnboardingPage: React.FC = () => {
 
   // Handle Student ID submit
   const handleVerifyStudentId = async () => {
+    const submittedStudentIdNumber = studentIdNumber;
+    // Raw student IDs must not remain in component state after submission.
+    setStudentIdNumber('');
     setIsLoading(true);
     try {
       const result = await backend.auth.registerStudent({
@@ -103,8 +106,8 @@ export const OnboardingPage: React.FC = () => {
         status: getValidStatus(),
         choice: {
           kind: 'student_id',
-          university_id: selectedUniId || 'uni-b',
-          student_id_number: studentIdNumber,
+          university_id: selectedUniId,
+          student_id_number: submittedStudentIdNumber,
         },
       });
 

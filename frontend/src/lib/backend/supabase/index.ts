@@ -30,6 +30,7 @@ import {
   RespondAccessInput,
   SignupInput,
   TicketFormInput,
+  publicVerifyResponseSchema,
 } from '../../schemas';
 import { levelFor, isBorderline } from '../../scoring';
 import { getSupabase } from '../../supabase/client';
@@ -339,20 +340,29 @@ export class SupabaseBackend implements Backend {
   
   student = {
     getPublicCredential: async (credentialId: string): Promise<PublicCredential | null> => {
-      if (!/^[a-f0-9]{18}$/i.test(credentialId)) return null;
+      if (!/^[a-f0-9]{18}$/.test(credentialId)) return null;
       if (!env.VITE_SUPABASE_URL || !env.VITE_SUPABASE_ANON_KEY) {
         throw new Error('Supabase is not configured for public credential verification.');
       }
       const baseUrl = env.VITE_SUPABASE_URL.replace(/\/$/, '');
+      const anonKey = env.VITE_SUPABASE_ANON_KEY;
       const response = await fetch(
         `${baseUrl}/functions/v1/public-verify?id=${encodeURIComponent(credentialId)}`,
-        { method: 'GET', headers: { apikey: env.VITE_SUPABASE_ANON_KEY } }
+        {
+          method: 'GET',
+          headers: {
+            apikey: anonKey,
+            Authorization: `Bearer ${anonKey}`,
+          },
+        }
       );
       if (response.status === 404) return null;
       if (!response.ok) throw new Error('Credential verification is temporarily unavailable.');
-      const result = await response.json() as { credential?: PublicCredential };
-      if (!result.credential || result.credential.credential_id !== credentialId) return null;
-      return result.credential;
+      const parsed = publicVerifyResponseSchema.safeParse(await response.json());
+      if (!parsed.success) throw new Error('Credential verification returned an invalid response.');
+      const credential = parsed.data.credential;
+      if (credential.credential_id !== credentialId) return null;
+      return credential;
     },
     getProfile: async (_studentId: string): Promise<StudentProfile> => {
       const data = await this.getCurrentStudentRow();
@@ -586,13 +596,14 @@ export class SupabaseBackend implements Backend {
 
       let body: Record<string, unknown>;
       if (params.proposal_id) {
-        body = { kind: 'proposal', proposal_id: params.proposal_id };
+        // Frozen contract: { proposal_id } (no discriminator or student ID).
+        body = { proposal_id: params.proposal_id };
       } else {
         const next = params.new!;
         const status = next.status === 'masters' ? 'enrolled' : next.status ?? 'enrolled';
         const program_level = next.status === 'masters' ? 'pg' : next.program_level ?? 'ug';
+        // Frozen contract: { new: { ... } } (no discriminator or student ID).
         body = {
-          kind: 'new',
           new: {
             ...(next.university_id ? { university_id: next.university_id } : {}),
             ...(next.university_name_text ? { university_name_text: next.university_name_text } : {}),

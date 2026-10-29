@@ -73,7 +73,8 @@ export const PublicVerifyPage: React.FC = () => {
     );
   }
 
-  const verifiedScores = credential.skills;
+  // The API may include explicitly unverified skills; never present those as verified.
+  const verifiedScores = credential.skills.filter((skill) => skill.verified);
 
   return (
     <div className="min-h-screen bg-mesh/50 antialiased py-12 px-4 sm:px-6 flex flex-col items-center justify-center">
