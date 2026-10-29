@@ -11,6 +11,7 @@ import {
   ProjectAssignment,
   ProjectBrief,
   PublicConfig,
+  PublicCredential,
   Scope,
   SkillEdge,
   SkillItem,
@@ -30,7 +31,7 @@ import {
   SignupInput,
   TicketFormInput,
 } from '../../schemas';
-import { levelFor, isVerified, isBorderline } from '../../scoring';
+import { levelFor, isBorderline } from '../../scoring';
 import { getSupabase } from '../../supabase/client';
 import { AuthUser, Backend, RegisterResult } from '../types';
 import * as tus from 'tus-js-client';
@@ -150,6 +151,60 @@ export class SupabaseBackend implements Backend {
     return data;
   }
 
+  private async mapSubmissionRow(row: Record<string, unknown>, studentId: string): Promise<Submission> {
+    const claimedIds = Array.isArray(row.claimed_skill_ids)
+      ? row.claimed_skill_ids.filter((id): id is string => typeof id === 'string')
+      : [];
+    const { data: skillRows, error: skillsError } = claimedIds.length
+      ? await this.client.from('skills').select('id,name').in('id', claimedIds)
+      : { data: [], error: null };
+    if (skillsError) throw skillsError;
+    const answers = asRecord(row.originality_answers);
+    const rawResponses = Array.isArray(row.originality_answers)
+      ? row.originality_answers
+      : Array.isArray(answers.responses) ? answers.responses : [];
+    const responses = rawResponses.filter((item): item is { question: string; answer: string; answered_in_video?: boolean } => {
+      const value = asRecord(item);
+      return typeof value.question === 'string' && typeof value.answer === 'string';
+    });
+    const rawPaths = Array.isArray(row.document_paths)
+      ? row.document_paths.filter((path): path is string => typeof path === 'string')
+      : [];
+    const documents: SubmissionDocument[] = rawPaths.map((path) => {
+      const name = path.split('/').pop() ?? path;
+      const ext = name.includes('.') ? name.split('.').pop() ?? '' : '';
+      return { id: path, name, size: 0, url: path, ext };
+    });
+    const videoPath = typeof row.video_path === 'string' ? row.video_path : null;
+    const videoUrl = typeof row.video_url === 'string' ? row.video_url : null;
+    const videoSource: Submission['video_source'] = videoPath
+      ? 'upload'
+      : videoUrl ? 'link' : 'none';
+
+    return {
+      id: String(row.id ?? ''),
+      student_id: studentId,
+      assignment_id: typeof answers.assignment_id === 'string' ? answers.assignment_id : null,
+      title: String(row.title ?? ''),
+      description: String(row.description ?? ''),
+      skills_claimed: (skillRows ?? []).map((skill) => String(skill.name)),
+      video_url: videoPath ?? videoUrl,
+      ...(typeof row.video_seconds === 'number' ? { video_duration_seconds: row.video_seconds } : {}),
+      ...(typeof row.video_bytes === 'number' ? { video_size_bytes: row.video_bytes } : {}),
+      video_source: videoSource,
+      documents,
+      live_url: typeof row.live_url === 'string' ? row.live_url : null,
+      github_url: typeof row.github_url === 'string' ? row.github_url : null,
+      originality_responses: responses,
+      ai_used: answers.ai_used === true,
+      ai_tools: Array.isArray(answers.ai_tools) ? answers.ai_tools.filter((item): item is string => typeof item === 'string') : [],
+      ai_notes: typeof answers.ai_notes === 'string' ? answers.ai_notes : '',
+      status: row.status as Submission['status'],
+      created_at: String(row.created_at ?? ''),
+      updated_at: String(row.updated_at ?? ''),
+    };
+  }
+
   // ---------------- AUTH ----------------
   auth = {
     getCurrentUser: async (): Promise<AuthUser | null> => {
@@ -234,7 +289,25 @@ export class SupabaseBackend implements Backend {
       await this.callEdgeFunction('complete-signup', { portal: 'student' });
     },
     registerStudent: async (input: RegisterStudentInput): Promise<RegisterResult> => {
-      return this.callEdgeFunction('register-student', input);
+      const response = await this.callEdgeFunction<
+        { full_name: string; program_level: 'ug' | 'pg'; year?: number; choice: RegisterStudentInput['choice'] },
+        {
+          student_id: string;
+          outcome: RegisterResult['outcome'];
+          affiliation?: { university_id?: string; label: string; verification: 'roster' | 'student_id' | 'unverified' };
+          matched_existing_person: boolean;
+        }
+      >('register-student', {
+        full_name: input.full_name,
+        program_level: input.program_level,
+        ...(input.year !== undefined ? { year: input.year } : {}),
+        choice: input.choice,
+      });
+      return {
+        student_id: response.student_id,
+        outcome: response.outcome,
+        matched_existing_person: response.matched_existing_person,
+      };
     },
     onAuthStateChange: (callback: (user: AuthUser | null) => void) => {
       const { data: { subscription } } = this.client.auth.onAuthStateChange(
@@ -265,6 +338,22 @@ export class SupabaseBackend implements Backend {
   // ---------------- STUDENT ----------------
   
   student = {
+    getPublicCredential: async (credentialId: string): Promise<PublicCredential | null> => {
+      if (!/^[a-f0-9]{18}$/i.test(credentialId)) return null;
+      if (!env.VITE_SUPABASE_URL || !env.VITE_SUPABASE_ANON_KEY) {
+        throw new Error('Supabase is not configured for public credential verification.');
+      }
+      const baseUrl = env.VITE_SUPABASE_URL.replace(/\/$/, '');
+      const response = await fetch(
+        `${baseUrl}/functions/v1/public-verify?id=${encodeURIComponent(credentialId)}`,
+        { method: 'GET', headers: { apikey: env.VITE_SUPABASE_ANON_KEY } }
+      );
+      if (response.status === 404) return null;
+      if (!response.ok) throw new Error('Credential verification is temporarily unavailable.');
+      const result = await response.json() as { credential?: PublicCredential };
+      if (!result.credential || result.credential.credential_id !== credentialId) return null;
+      return result.credential;
+    },
     getProfile: async (_studentId: string): Promise<StudentProfile> => {
       const data = await this.getCurrentStudentRow();
       const targetSkillIds = Array.isArray(data.target_skill_ids)
@@ -424,25 +513,58 @@ export class SupabaseBackend implements Backend {
 
   // ---------------- AFFILIATIONS ----------------
   affiliations = {
-    listAffiliations: async (studentId: string): Promise<Affiliation[]> => {
+    listAffiliations: async (_studentId: string): Promise<Affiliation[]> => {
+      const student = await this.getCurrentStudentRow();
       const { data, error } = await this.client
         .from('affiliations')
-        .select('*')
-        .eq('student_id', studentId)
+        .select('id,student_id,university_id,university_name_text,verification,program_level,year,status,is_current,started_on,ended_on,universities(name,short_name)')
+        .eq('student_id', student.id)
         .order('is_current', { ascending: false });
       if (error) throw error;
-      return data || [];
+      return (data ?? []).map((row) => {
+        const university = row.universities as { name?: string; short_name?: string | null } | null;
+        const status = row.status === 'incoming' || row.status === 'alumni' || row.status === 'dropout'
+          ? row.status
+          : 'enrolled';
+        const verification = row.verification === 'roster' || row.verification === 'student_id'
+          ? row.verification
+          : 'unverified';
+        return {
+          id: row.id,
+          student_id: row.student_id,
+          university_id: row.university_id,
+          university_name: row.university_name_text ?? university?.name ?? university?.short_name ?? '',
+          ...(row.program_level === 'pg' || row.program_level === 'ug' ? { program_level: row.program_level } : {}),
+          ...(row.year !== null ? { year: row.year } : {}),
+          status,
+          is_verified: verification !== 'unverified',
+          verification_type: verification,
+          started_at: row.started_on,
+          ...(row.ended_on ? { ended_at: row.ended_on } : {}),
+          is_current: row.is_current,
+        };
+      });
     },
     listProposals: async (_studentId: string): Promise<AffiliationProposal[]> => {
-      // Reads from my_affiliation_proposals view
       const { data, error } = await this.client
         .from('my_affiliation_proposals')
-        .select('*');
-      if (error) {
-        // Fallback gracefully if view is not yet added in backend
-        return [];
-      }
-      return data || [];
+        .select('id,student_id,university_id,university_name,program_level,status,year,proposal_state,created_at')
+        .eq('proposal_state', 'pending')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data ?? []).map((row) => ({
+        id: row.id,
+        student_id: row.student_id,
+        university_id: row.university_id,
+        university_name: row.university_name,
+        ...(row.program_level === 'pg' || row.program_level === 'ug' ? { program_level: row.program_level } : {}),
+        year: row.year ?? 1,
+        status: row.status === 'incoming' || row.status === 'alumni' || row.status === 'dropout'
+          ? row.status
+          : 'enrolled',
+        is_verified: false,
+        created_at: row.created_at,
+      }));
     },
     confirmAffiliation: async (params: {
       student_id: string;
@@ -503,7 +625,7 @@ export class SupabaseBackend implements Backend {
         student_id: String(current.id),
         university_id: item.university_id,
         university_name: item.university_name_text ?? '',
-        program_level: item.program_level ?? 'ug',
+        ...(item.program_level === 'pg' || item.program_level === 'ug' ? { program_level: item.program_level } : {}),
         ...(item.year !== null ? { year: item.year } : {}),
         status: item.status,
         is_verified: item.verification !== 'unverified',
@@ -527,10 +649,18 @@ export class SupabaseBackend implements Backend {
     },
     listUniversities: async (): Promise<UniversityPublic[]> => {
       const { data, error } = await this.client
-        .from('universities')
-        .select('id, name, slug, email_domains');
+        .from('public_universities')
+        .select('id,name,short_name,city,state');
       if (error) throw error;
-      return data || [];
+      return (data ?? []).map((row) => ({
+        id: row.id,
+        name: row.name,
+        slug: undefined,
+        email_domains: [],
+        short_name: row.short_name,
+        city: row.city,
+        state: row.state,
+      }));
     },
   };
 
@@ -539,29 +669,48 @@ export class SupabaseBackend implements Backend {
     listSkills: async (): Promise<SkillItem[]> => {
       const { data, error } = await this.client
         .from('skills')
-        .select('id, name, slug, family, description');
+        .select('id,name,slug,family_id,skill_families(name)')
+        .order('name');
       if (error) throw error;
-      return data || [];
+      return (data ?? []).map((row) => {
+        const family = row.skill_families as { name?: string } | null;
+        return {
+          id: row.id,
+          name: row.name,
+          slug: row.slug,
+          family: family?.name ?? 'Other',
+        };
+      });
     },
     listSkillEdges: async (): Promise<SkillEdge[]> => {
       const { data, error } = await this.client
         .from('skill_edges')
-        .select('source, target');
+        .select('from_skill_id,to_skill_id');
       if (error) throw error;
-      return data || [];
+      return (data ?? []).map((row) => ({
+        source: row.from_skill_id,
+        target: row.to_skill_id,
+      }));
     },
   };
 
   // ---------------- PROJECTS ----------------
   projects = {
-    listAssignments: async (studentId: string): Promise<ProjectAssignment[]> => {
+    listAssignments: async (_studentId: string): Promise<ProjectAssignment[]> => {
+      const student = await this.getCurrentStudentRow();
       const { data, error } = await this.client
         .from('project_assignments')
-        .select('*')
-        .eq('student_id', studentId)
+        .select('id,student_id,template_id,status,brief,created_at')
+        .eq('student_id', student.id)
         .order('created_at', { ascending: false });
       if (error) throw error;
-      return data || [];
+      return (data ?? []).map((row) => ({
+        id: row.id,
+        student_id: row.student_id,
+        brief: row.brief as ProjectBrief,
+        status: row.status as ProjectAssignment['status'],
+        created_at: row.created_at,
+      }));
     },
     getAssignment: async (assignmentId: string): Promise<ProjectAssignment | null> => {
       const { data, error } = await this.client
@@ -597,66 +746,122 @@ export class SupabaseBackend implements Backend {
     },
     updateAssignmentStatus: async (
       assignmentId: string,
-      status: 'assigned' | 'in_progress' | 'submitted' | 'completed'
+      status: 'in_progress'
     ): Promise<ProjectAssignment> => {
+      if (status !== 'in_progress') throw new Error('The backend only permits starting an assigned project here.');
       const { data, error } = await this.client
         .from('project_assignments')
-        .update({ status })
+        .update({ status: 'in_progress' })
         .eq('id', assignmentId)
-        .select()
+        .select('id,student_id,template_id,status,brief,created_at')
         .single();
       if (error) throw error;
-      return data;
+      return {
+        id: data.id,
+        student_id: data.student_id,
+        brief: data.brief as ProjectBrief,
+        status: data.status as ProjectAssignment['status'],
+        created_at: data.created_at,
+      };
     },
   };
 
   // ---------------- SUBMISSIONS ----------------
   submissions = {
-    listSubmissions: async (studentId: string): Promise<Submission[]> => {
+    listSubmissions: async (_studentId: string): Promise<Submission[]> => {
+      const student = await this.getCurrentStudentRow();
       const { data, error } = await this.client
         .from('submissions')
-        .select('*')
-        .eq('student_id', studentId)
+        .select('id,student_id,template_id,title,description,status,claimed_skill_ids,video_path,video_url,video_seconds,video_bytes,originality_answers,live_url,github_url,document_paths,created_at,updated_at')
+        .eq('student_id', student.id)
         .order('updated_at', { ascending: false });
       if (error) throw error;
-      return data || [];
+      return Promise.all((data ?? []).map((row) => this.mapSubmissionRow(row as Record<string, unknown>, String(student.id))));
     },
     getSubmission: async (submissionId: string): Promise<Submission | null> => {
+      const student = await this.getCurrentStudentRow();
       const { data, error } = await this.client
         .from('submissions')
-        .select('*')
+        .select('id,student_id,template_id,title,description,status,claimed_skill_ids,video_path,video_url,video_seconds,video_bytes,originality_answers,live_url,github_url,document_paths,created_at,updated_at')
         .eq('id', submissionId)
-        .single();
-      if (error) return null;
-      return data;
+        .eq('student_id', student.id)
+        .maybeSingle();
+      if (error) throw error;
+      return data ? this.mapSubmissionRow(data as Record<string, unknown>, String(student.id)) : null;
     },
     saveDraft: async (
       draft: Partial<Submission> & { student_id: string }
     ): Promise<Submission> => {
-      if (draft.id) {
-        const { data, error } = await this.client
-          .from('submissions')
-          .update(draft)
-          .eq('id', draft.id)
-          .select()
-          .single();
-        if (error) throw error;
-        return data;
-      } else {
-        const { data, error } = await this.client
-          .from('submissions')
-          .insert(draft)
-          .select()
-          .single();
-        if (error) throw error;
-        return data;
+      const student = await this.getCurrentStudentRow();
+      const skillNames = draft.skills_claimed ?? [];
+      const { data: skillRows, error: skillsError } = skillNames.length
+        ? await this.client.from('skills').select('id,name').in('name', skillNames)
+        : { data: [], error: null };
+      if (skillsError) throw skillsError;
+      const skillMap = new Map((skillRows ?? []).map((skill) => [String(skill.name), String(skill.id)]));
+      const missingSkills = skillNames.filter((name) => !skillMap.has(name));
+      if (missingSkills.length) throw new Error('One or more claimed skills are not in the catalog.');
+
+      let templateId: string | null = null;
+      if (draft.assignment_id) {
+        const { data: assignment, error: assignmentError } = await this.client
+          .from('project_assignments')
+          .select('template_id')
+          .eq('id', draft.assignment_id)
+          .eq('student_id', student.id)
+          .maybeSingle();
+        if (assignmentError) throw assignmentError;
+        if (!assignment) throw new Error('The selected project assignment could not be found.');
+        templateId = assignment.template_id;
       }
+
+      const videoPath = draft.video_source === 'upload' && draft.video_url ? draft.video_url : null;
+      const videoLink = draft.video_source === 'link' && draft.video_url ? draft.video_url : null;
+      const originalityAnswers = {
+        responses: draft.originality_responses ?? [],
+        ai_used: draft.ai_used ?? false,
+        ai_tools: draft.ai_tools ?? [],
+        ai_notes: draft.ai_notes ?? '',
+        assignment_id: draft.assignment_id ?? null,
+      };
+      const fields = {
+        title: draft.title ?? '',
+        description: draft.description ?? '',
+        claimed_skill_ids: skillNames.map((name) => skillMap.get(name)!),
+        video_path: videoPath,
+        video_url: videoLink,
+        video_seconds: draft.video_duration_seconds ?? null,
+        video_bytes: draft.video_size_bytes ?? null,
+        originality_answers: originalityAnswers,
+        live_url: draft.live_url ?? null,
+        github_url: draft.github_url ?? null,
+        document_paths: (draft.documents ?? []).map((doc) => doc.url),
+      };
+
+      const submissionId = draft.id && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(draft.id) ? draft.id : null;
+      const query = submissionId
+        ? this.client.from('submissions').update(fields).eq('id', submissionId).eq('student_id', student.id).eq('status', 'draft')
+        : this.client.from('submissions').insert({
+            ...fields,
+            student_id: student.id,
+            template_id: templateId,
+            status: 'draft',
+          });
+      const { data, error } = await query
+        .select('id,student_id,template_id,title,description,status,claimed_skill_ids,video_path,video_url,video_seconds,video_bytes,originality_answers,live_url,github_url,document_paths,created_at,updated_at')
+        .single();
+      if (error) throw error;
+      return this.mapSubmissionRow(data as Record<string, unknown>, String(student.id));
     },
     submitProject: async (params: {
       submission_id: string;
       confirm: boolean;
     }): Promise<{ run_id: string; status: string; mode: string }> => {
-      return this.callEdgeFunction('submit-project', params);
+      if (params.confirm !== true) throw new Error('Confirm the submission before sending it for review.');
+      return this.callEdgeFunction('submit-project', {
+        submission_id: params.submission_id,
+        confirm: true,
+      });
     },
     retrySubmission: async (
       submissionId: string
@@ -675,11 +880,13 @@ export class SupabaseBackend implements Backend {
       submissionId: string,
       onProgress?: (percent: number) => void
     ): Promise<{ url: string; duration: number; size: number }> => {
-      const { data: { user } } = await this.client.auth.getUser();
-      if (!user) throw new Error('Authentication required for video upload');
+      const student = await this.getCurrentStudentRow();
       const { data: { session } } = await this.client.auth.getSession();
+      if (!session?.access_token) throw new Error('Authentication required for video upload');
+      if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(submissionId)) throw new Error('Save the submission draft before uploading video.');
       const ext = file.name.split('.').pop() || 'mp4';
-      const endpoint = `${env.VITE_SUPABASE_URL}/storage/v1/upload/resumable`;
+      if (!env.VITE_SUPABASE_URL) throw new Error('Supabase storage is not configured.');
+      const endpoint = `${env.VITE_SUPABASE_URL.replace(/\/$/, '')}/storage/v1/upload/resumable`;
 
       return new Promise((resolve, reject) => {
         const upload = new tus.Upload(file, {
@@ -693,7 +900,7 @@ export class SupabaseBackend implements Backend {
           removeFingerprintOnSuccess: true,
           metadata: {
             bucketName: 'videos',
-            objectName: `${user.id}/${submissionId}/demo.${ext}`,
+            objectName: `${student.id}/${submissionId}/demo.${ext}`,
             contentType: file.type,
           },
           chunkSize: 6 * 1024 * 1024,
@@ -703,7 +910,7 @@ export class SupabaseBackend implements Backend {
             if (onProgress) onProgress(percentage);
           },
           onSuccess: () => {
-            const path = `${user.id}/${submissionId}/demo.${ext}`;
+            const path = `${student.id}/${submissionId}/demo.${ext}`;
             resolve({ url: path, duration: 0, size: file.size });
           },
         });
@@ -714,10 +921,11 @@ export class SupabaseBackend implements Backend {
       file: File,
       submissionId: string
     ): Promise<SubmissionDocument> => {
-      const { data: { user } } = await this.client.auth.getUser();
-      if (!user) throw new Error('Authentication required');
+      const student = await this.getCurrentStudentRow();
+      if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(submissionId)) throw new Error('Save the submission draft before uploading documents.');
       const ext = file.name.split('.').pop() || 'pdf';
-      const path = `${user.id}/${submissionId}/${file.name}`;
+      const safeName = file.name.replace(/[\\/\\\\]/g, '_');
+      const path = `${student.id}/${submissionId}/${safeName}`;
 
       const { error } = await this.client.storage
         .from('documents')
@@ -759,22 +967,55 @@ export class SupabaseBackend implements Backend {
     getAudit: async (submissionId: string): Promise<Audit | null> => {
       const { data, error } = await this.client
         .from('audits')
-        .select('*')
+        .select('id,submission_id,created_at,overall_score,confidence,summary,rubric,evidence,next_steps,transcript,review_status')
         .eq('submission_id', submissionId)
-        .single();
-      if (error) return null;
-      return data;
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return null;
+      const rawStatus = String(data.review_status ?? 'unreviewed');
+      const review_status: Audit['review_status'] = rawStatus === 'pending' || rawStatus === 'confirmed' || rawStatus === 'adjusted'
+        ? rawStatus
+        : 'none';
+      return {
+        id: data.id,
+        submission_id: data.submission_id,
+        created_at: data.created_at,
+        overall: Number(data.overall_score ?? 0),
+        confidence: Number(data.confidence ?? 0),
+        summary: data.summary ?? '',
+        next_steps: Array.isArray(data.next_steps) ? data.next_steps.filter((item): item is string => typeof item === 'string') : [],
+        flags: [],
+        borderline: review_status === 'pending',
+        review_status,
+        per_skill: [],
+        evidence: Array.isArray(data.evidence) ? data.evidence as Audit['evidence'] : [],
+        ...(Array.isArray(data.transcript) ? { transcript: data.transcript as Audit['transcript'] } : {}),
+      };
     },
     getAgentRun: async (submissionId: string): Promise<AgentRun | null> => {
       const { data, error } = await this.client
         .from('agent_runs')
-        .select('*')
+        .select('id,submission_id,stage,status,created_at,started_at,finished_at,error_code')
         .eq('submission_id', submissionId)
-        .order('started_at', { ascending: false })
+        .order('started_at', { ascending: false, nullsFirst: false })
         .limit(1)
-        .single();
-      if (error) return null;
-      return data;
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return null;
+      const status: AgentRun['status'] = data.status === 'completed' || data.status === 'failed'
+        ? data.status
+        : 'running';
+      return {
+        id: data.id,
+        submission_id: data.submission_id,
+        stage: data.stage as AgentRun['stage'],
+        status,
+        started_at: data.started_at ?? data.created_at,
+        updated_at: data.finished_at ?? data.started_at ?? data.created_at,
+        ...(data.error_code ? { error: data.error_code } : {}),
+      };
     },
     subscribeAgentRun: (
       submissionId: string,
@@ -791,7 +1032,19 @@ export class SupabaseBackend implements Backend {
             filter: `submission_id=eq.${submissionId}`,
           },
           (payload) => {
-            onUpdate(payload.new as AgentRun);
+            const row = payload.new as Record<string, unknown>;
+            if (!row.id) return;
+            const createdAt = typeof row.created_at === 'string' ? row.created_at : '';
+            const startedAt = typeof row.started_at === 'string' ? row.started_at : createdAt;
+            onUpdate({
+              id: String(row.id),
+              submission_id: String(row.submission_id ?? submissionId),
+              stage: row.stage as AgentRun['stage'],
+              status: row.status === 'completed' || row.status === 'failed' ? row.status : 'running',
+              started_at: startedAt,
+              updated_at: typeof row.finished_at === 'string' ? row.finished_at : startedAt,
+              ...(typeof row.error_code === 'string' ? { error: row.error_code } : {}),
+            });
           }
         )
         .subscribe();
@@ -804,86 +1057,155 @@ export class SupabaseBackend implements Backend {
 
   // ---------------- SCORES ----------------
   scores = {
-    listSkillScores: async (studentId: string): Promise<SkillScore[]> => {
+    listSkillScores: async (_studentId: string): Promise<SkillScore[]> => {
+      const student = await this.getCurrentStudentRow();
       const { data, error } = await this.client
         .from('skill_scores')
-        .select('*')
-        .eq('student_id', studentId);
+        .select('id,student_id,skill_id,score,level,verified,pending_review,share_ok,audit_id,updated_at,skills!inner(name,slug,family_id,skill_families(name))')
+        .eq('student_id', student.id);
       if (error) throw error;
-      return (data || []).map((row: Record<string, unknown>) => {
-        const score = typeof row.score === 'number' ? row.score : 0;
+      return (data ?? []).map((row) => {
+        const skill = row.skills as { name?: string; slug?: string; skill_families?: { name?: string } | null } | null;
+        const score = Number(row.score);
         return {
-          ...(row as unknown as SkillScore),
+          id: row.id,
+          student_id: row.student_id,
+          skill_id: row.skill_id,
+          skill_name: skill?.name ?? '',
+          skill_slug: skill?.slug ?? '',
+          family: skill?.skill_families?.name ?? '',
+          score,
           level: levelFor(score),
-          is_verified: isVerified(score),
+          is_verified: row.verified === true && row.pending_review !== true,
           is_borderline: isBorderline(score),
+          last_reviewed_at: row.updated_at ?? '',
+          audit_id: row.audit_id ?? '',
         };
       });
     },
     getSkillScore: async (
-      studentId: string,
+      _studentId: string,
       skillSlug: string
     ): Promise<SkillScore | null> => {
+      const student = await this.getCurrentStudentRow();
+      const { data: skill, error: skillError } = await this.client
+        .from('skills')
+        .select('id')
+        .eq('slug', skillSlug)
+        .maybeSingle();
+      if (skillError) throw skillError;
+      if (!skill) return null;
       const { data, error } = await this.client
         .from('skill_scores')
-        .select('*')
-        .eq('student_id', studentId)
-        .eq('skill_slug', skillSlug)
-        .single();
-      if (error) return null;
+        .select('id,student_id,skill_id,score,level,verified,pending_review,share_ok,audit_id,updated_at,skills!inner(name,slug,family_id,skill_families(name))')
+        .eq('student_id', student.id)
+        .eq('skill_id', skill.id)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return null;
+      const skillData = data.skills as { name?: string; slug?: string; skill_families?: { name?: string } | null } | null;
+      const score = Number(data.score);
       return {
-        ...data,
-        level: levelFor(data.score),
-        is_verified: isVerified(data.score),
-        is_borderline: isBorderline(data.score),
+        id: data.id,
+        student_id: data.student_id,
+        skill_id: data.skill_id,
+        skill_name: skillData?.name ?? '',
+        skill_slug: skillData?.slug ?? '',
+        family: skillData?.skill_families?.name ?? '',
+        score,
+        level: levelFor(score),
+        is_verified: data.verified === true && data.pending_review !== true,
+        is_borderline: isBorderline(score),
+        last_reviewed_at: data.updated_at ?? '',
+        audit_id: data.audit_id ?? '',
       };
     },
     listScoreHistory: async (
-      studentId: string,
+      _studentId: string,
       skillId?: string
     ): Promise<SkillScoreHistory[]> => {
+      const student = await this.getCurrentStudentRow();
       let query = this.client
         .from('skill_score_history')
-        .select('*')
-        .eq('student_id', studentId)
+        .select('id,student_id,skill_id,score,audit_id,created_at')
+        .eq('student_id', student.id)
         .order('created_at', { ascending: true });
-
-      if (skillId) {
-        query = query.eq('skill_id', skillId);
-      }
+      if (skillId) query = query.eq('skill_id', skillId);
       const { data, error } = await query;
       if (error) throw error;
-      return data || [];
+      return (data ?? []).map((row) => ({
+        id: row.id,
+        student_id: row.student_id,
+        skill_id: row.skill_id,
+        score: Number(row.score),
+        audit_id: row.audit_id ?? '',
+        created_at: row.created_at,
+      }));
     },
   };
 
   // ---------------- TICKETS ----------------
   tickets = {
-    listTickets: async (studentId: string): Promise<Ticket[]> => {
+    listTickets: async (_studentId: string): Promise<Ticket[]> => {
+      const student = await this.getCurrentStudentRow();
       const { data, error } = await this.client
         .from('tickets')
-        .select('*')
-        .eq('student_id', studentId)
+        .select('id,submission_id,student_id,reason,status,decision,created_at,resolved_at')
+        .eq('student_id', student.id)
         .order('created_at', { ascending: false });
       if (error) throw error;
-      return data || [];
+      return (data ?? []).map((row) => {
+        const divider = row.reason.indexOf(' — ');
+        const status: Ticket['status'] = row.status === 'closed'
+          ? 'decision'
+          : row.status === 'assigned'
+            ? 'under_review'
+            : 'received';
+        const decision: Ticket['decision'] | undefined = row.decision === 'upheld'
+          ? 'upheld'
+          : row.decision === 'adjusted'
+            ? 'adjusted'
+            : row.decision === 'overturned'
+              ? 'rejected'
+              : undefined;
+        return {
+          id: row.id,
+          student_id: row.student_id,
+          submission_id: row.submission_id,
+          skill_name: divider > 0 ? row.reason.slice(0, divider) : '',
+          reason: divider > 0 ? row.reason.slice(divider + 3) : row.reason,
+          status,
+          ...(decision ? { decision } : {}),
+          created_at: row.created_at,
+          updated_at: row.resolved_at ?? row.created_at,
+        };
+      });
     },
     createTicket: async (
       input: TicketFormInput & { student_id: string }
     ): Promise<Ticket> => {
+      const student = await this.getCurrentStudentRow();
+      const reason = `${input.skill_name} — ${input.reason}`;
       const { data, error } = await this.client
         .from('tickets')
         .insert({
-          student_id: input.student_id,
+          student_id: student.id,
           submission_id: input.submission_id,
-          skill_name: input.skill_name,
-          reason: input.reason,
-          status: 'received',
+          reason,
         })
-        .select()
+        .select('id,submission_id,student_id,reason,status,decision,created_at,resolved_at')
         .single();
       if (error) throw error;
-      return data;
+      return {
+        id: data.id,
+        student_id: data.student_id,
+        submission_id: data.submission_id,
+        skill_name: input.skill_name,
+        reason: input.reason,
+        status: 'received',
+        created_at: data.created_at,
+        updated_at: data.created_at,
+      };
     },
   };
 
@@ -976,47 +1298,78 @@ export class SupabaseBackend implements Backend {
       });
     },
     listProposals: async (_studentId: string): Promise<ProfileProposal[]> => {
-      // TODO(backend): profile_proposals storage for synced changes
-      return [];
+      const student = await this.getCurrentStudentRow();
+      const { data, error } = await this.client
+        .from('profile_proposals')
+        .select('id,source_id,changes,state,created_at,profile_sources(source_type)')
+        .eq('student_id', student.id)
+        .eq('state', 'pending')
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      return (data ?? []).flatMap((row): ProfileProposal[] => {
+        const changes = Array.isArray(row.changes) ? row.changes : [];
+        const sourceRow = row.profile_sources as { source_type?: string } | null;
+        const source = sourceRow?.source_type === 'linkedin_export' ? 'linkedin_export'
+          : sourceRow?.source_type === 'github' ? 'github'
+          : null;
+        if (!source || changes.length === 0) return [];
+        return [{
+          id: row.id,
+          state: row.state as ProfileProposal['state'],
+          source,
+          changes: changes as ProfileProposal['changes'],
+        }];
+      });
     },
-    applyProposal: async (_studentId: string, _proposalIndex: number): Promise<void> => {
-      // TODO(backend): apply proposal endpoint
+    applyProposal: async (_studentId: string, proposalIndex: number): Promise<void> => {
+      const student = await this.getCurrentStudentRow();
+      const proposals = await this.sources.listProposals(String(student.id));
+      const proposal = proposals[proposalIndex];
+      if (!proposal?.id) throw new Error('Profile suggestion is no longer pending. Refresh and try again.');
+      const { error } = await this.client
+        .from('profile_proposals')
+        .update({ state: 'approved' })
+        .eq('id', proposal.id)
+        .eq('student_id', student.id)
+        .eq('state', 'pending');
+      if (error) throw error;
     },
-    dismissProposal: async (_studentId: string, _proposalIndex: number): Promise<void> => {
-      // TODO(backend): dismiss proposal endpoint
+    dismissProposal: async (_studentId: string, proposalIndex: number): Promise<void> => {
+      const student = await this.getCurrentStudentRow();
+      const proposals = await this.sources.listProposals(String(student.id));
+      const proposal = proposals[proposalIndex];
+      if (!proposal?.id) throw new Error('Profile suggestion is no longer pending. Refresh and try again.');
+      const { error } = await this.client
+        .from('profile_proposals')
+        .update({ state: 'dismissed' })
+        .eq('id', proposal.id)
+        .eq('student_id', student.id)
+        .eq('state', 'pending');
+      if (error) throw error;
     },
   };
 
   // ---------------- SHARING ----------------
   sharing = {
-    listAccessRequests: async (studentId: string): Promise<AccessRequest[]> => {
+    listAccessRequests: async (_studentId: string): Promise<AccessRequest[]> => {
       const { data, error } = await this.client
-        .from('access_requests')
-        .select(
-          `id, status, requested_scopes, granted_scopes, duration_days, expires_at, created_at,
-           organizations (name, is_verified),
-           jobs (title)`
-        )
-        .eq('student_id', studentId)
+        .from('student_access_requests_v')
+        .select('id,organization_name,organization_verified,job_title,message,requested_scope,granted_scope,duration_days,status,expires_at,created_at')
         .order('created_at', { ascending: false });
       if (error) throw error;
-      return (data || []).map((row: Record<string, unknown>) => {
-        const org = row.organizations as { name?: string; is_verified?: boolean } | undefined;
-        const job = row.jobs as { title?: string } | undefined;
-        return {
-          id: String(row.id),
-          organization_name: org?.name || 'Organization',
-          organization_verified: !!org?.is_verified,
-          job_title: job?.title || 'Job Opportunity',
-          message: typeof row.message === 'string' ? row.message : '',
-          requested_scopes: (row.requested_scopes as Scope[]) || [],
-          duration_days: typeof row.duration_days === 'number' ? row.duration_days : 30,
-          status: (row.status as 'pending' | 'accepted' | 'declined' | 'withdrawn' | 'expired') || 'pending',
-          granted_scopes: row.granted_scopes as Scope[] | undefined,
-          expires_at: typeof row.expires_at === 'string' ? row.expires_at : undefined,
-          created_at: typeof row.created_at === 'string' ? row.created_at : '',
-        };
-      });
+      return (data ?? []).map((row) => ({
+        id: row.id,
+        organization_name: row.organization_name,
+        organization_verified: row.organization_verified === true,
+        job_title: row.job_title,
+        message: row.message ?? '',
+        requested_scopes: Array.isArray(row.requested_scope) ? row.requested_scope as Scope[] : [],
+        duration_days: typeof row.duration_days === 'number' ? row.duration_days : 30,
+        status: row.status as AccessRequest['status'],
+        granted_scopes: Array.isArray(row.granted_scope) ? row.granted_scope as Scope[] : undefined,
+        expires_at: row.expires_at ?? undefined,
+        created_at: row.created_at,
+      }));
     },
     respondAccess: async (
       input: RespondAccessInput
@@ -1026,35 +1379,39 @@ export class SupabaseBackend implements Backend {
     withdrawAccess: async (requestId: string): Promise<{ status: 'withdrawn' }> => {
       return this.callEdgeFunction('withdraw-access', { request_id: requestId });
     },
-    listFeedback: async (studentId: string): Promise<FeedbackItem[]> => {
-      const { data, error } = await this.client
-        .from('feedback')
-        .select('id, organization_name, job_title, category, label, note, created_at')
-        .eq('student_id', studentId);
-      if (error) return [];
-      return data || [];
+    listFeedback: async (_studentId: string): Promise<FeedbackItem[]> => {
+      // The current backend intentionally grants students no SELECT access to organization feedback.
+      // Do not issue a forbidden query or fabricate feedback rows in the browser.
+      return [];
     },
     subscribeAccessRequests: (
-      studentId: string,
+      _studentId: string,
       onRequestChange: (request: AccessRequest) => void
     ): () => void => {
-      const channel = this.client
-        .channel(`access_requests_${studentId}`)
-        .on(
-          'postgres_changes',
-          {
+      let disposed = false;
+      let channel: ReturnType<typeof this.client.channel> | null = null;
+      void this.getCurrentStudentRow().then((student) => {
+        if (disposed) return;
+        channel = this.client
+          .channel(`student_access_requests_${student.id}`)
+          .on('postgres_changes', {
             event: '*',
             schema: 'public',
             table: 'access_requests',
-            filter: `student_id=eq.${studentId}`,
-          },
-          (payload) => {
-            onRequestChange(payload.new as AccessRequest);
-          }
-        )
-        .subscribe();
+            filter: `student_id=eq.${student.id}`,
+          }, (payload) => {
+            const changedId = String((payload.new as Record<string, unknown>)?.id ?? '');
+            if (!changedId) return;
+            void this.sharing.listAccessRequests(String(student.id)).then((requests) => {
+              const changed = requests.find((request) => request.id === changedId);
+              if (!disposed && changed) onRequestChange(changed);
+            }).catch(() => undefined);
+          })
+          .subscribe();
+      }).catch(() => undefined);
       return () => {
-        this.client.removeChannel(channel);
+        disposed = true;
+        if (channel) void this.client.removeChannel(channel);
       };
     },
   };
@@ -1072,26 +1429,12 @@ export class SupabaseBackend implements Backend {
       return (data ?? []).map((row) => mapNotification(row as Record<string, unknown>, String(current.id)));
     },
 
-    markNotificationRead: async (notificationId: string): Promise<void> => {
-      const { data: { user }, error: userError } = await this.client.auth.getUser();
-      if (userError || !user) throw new Error('Authentication required');
-      const { error } = await this.client
-        .from('notifications')
-        .update({ read_at: new Date().toISOString() })
-        .eq('id', notificationId)
-        .eq('user_id', user.id);
-      if (error) throw error;
+    markNotificationRead: async (_notificationId: string): Promise<void> => {
+      throw new Error('The current backend exposes notifications as read-only.');
     },
 
     markAllNotificationsRead: async (_studentId: string): Promise<void> => {
-      const { data: { user }, error: userError } = await this.client.auth.getUser();
-      if (userError || !user) throw new Error('Authentication required');
-      const { error } = await this.client
-        .from('notifications')
-        .update({ read_at: new Date().toISOString() })
-        .eq('user_id', user.id)
-        .is('read_at', null);
-      if (error) throw error;
+      throw new Error('The current backend exposes notifications as read-only.');
     },
 
     subscribeNotifications: (

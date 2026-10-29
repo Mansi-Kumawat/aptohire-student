@@ -12,6 +12,7 @@ import {
   ProjectAssignment,
   ProjectBrief,
   PublicConfig,
+  PublicCredential,
   SkillEdge,
   SkillItem,
   SkillScore,
@@ -686,6 +687,40 @@ export class MockBackend implements Backend {
 
   // ---------------- STUDENT ----------------
   student = {
+    getPublicCredential: async (credentialId: string): Promise<PublicCredential | null> => {
+      await this.sleep(100);
+      const profile = Object.values(this.state.profiles).find((item) => item.credential_id === credentialId);
+      if (!profile) return null;
+      const sharedFields = [
+        ...(profile.visibility.public_name ? ['name'] : []),
+        ...(profile.visibility.public_university ? ['university'] : []),
+        ...(profile.visibility.public_skills ? ['skills'] : []),
+        ...(profile.visibility.public_levels && profile.visibility.public_skills ? ['levels'] : []),
+        ...(profile.visibility.public_scores && profile.visibility.public_levels && profile.visibility.public_skills ? ['scores'] : []),
+      ];
+      const rows = (this.state.skillScores[profile.id] ?? []).filter((score) => score.is_verified && !score.is_borderline);
+      const dates = rows.map((score) => score.last_reviewed_at).filter(Boolean).sort();
+      const affiliation = profile.visibility.public_university
+        ? (this.state.affiliations[profile.id] ?? []).find((item) => item.is_current)
+        : undefined;
+      return {
+        credential_id: profile.credential_id,
+        issued_at: (dates[0] ?? new Date().toISOString()).slice(0, 10),
+        last_updated: (dates.at(-1) ?? new Date().toISOString()).slice(0, 10),
+        ...(profile.visibility.public_name ? { display_name: profile.full_name } : {}),
+        ...(affiliation ? {
+          affiliation: { label: affiliation.university_name, verification: affiliation.verification_type },
+        } : {}),
+        skills: profile.visibility.public_skills ? rows.map((score) => ({
+          name: score.skill_name,
+          level: profile.visibility.public_levels ? score.level : 'Verified',
+          verified: true as const,
+          ...(profile.visibility.public_scores ? { score: score.score } : {}),
+          ...(score.last_reviewed_at ? { verified_on: score.last_reviewed_at.slice(0, 10) } : {}),
+        })) : [],
+        shared_fields: sharedFields,
+      };
+    },
     getProfile: async (studentId: string): Promise<StudentProfile> => {
       await this.sleep(250);
       const profile = this.state.profiles[studentId];

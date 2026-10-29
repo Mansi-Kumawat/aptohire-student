@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useBackend } from '@/lib/backend';
+import { env } from '@/config/env';
 import { useAuth } from '@/features/auth/useAuth';
 import { NotificationItem } from '@/lib/domain/types';
 import { Button } from '@/components/ui/Button';
@@ -20,25 +21,37 @@ export const NotificationsPage: React.FC = () => {
 
   useEffect(() => {
     if (user) {
-      backend.notifications.listNotifications(user.id).then((notifs) => {
-        setNotifications(notifs);
-        setIsLoading(false);
-      });
+      backend.notifications.listNotifications(user.id)
+        .then((notifs) => setNotifications(notifs))
+        .catch((error) => {
+          console.error('Failed to load notifications', error);
+          setNotifications([]);
+        })
+        .finally(() => setIsLoading(false));
     }
   }, [backend, user]);
 
   const handleMarkAllRead = async () => {
-    if (!user) return;
-    await backend.notifications.markAllNotificationsRead(user.id);
-    const updated = await backend.notifications.listNotifications(user.id);
-    setNotifications(updated);
+    if (!user || !env.VITE_USE_MOCKS) return;
+    try {
+      await backend.notifications.markAllNotificationsRead(user.id);
+      const updated = await backend.notifications.listNotifications(user.id);
+      setNotifications(updated);
+    } catch (error) {
+      console.error('Failed to mark notifications as read', error);
+    }
   };
 
   const handleMarkRead = async (id: string) => {
-    await backend.notifications.markNotificationRead(id);
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read_at: new Date().toISOString() } : n))
-    );
+    if (!env.VITE_USE_MOCKS) return;
+    try {
+      await backend.notifications.markNotificationRead(id);
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, read_at: new Date().toISOString() } : n))
+      );
+    } catch (error) {
+      console.error('Failed to mark notification as read', error);
+    }
   };
 
   const unreadCount = notifications.filter((n) => !n.read_at).length;
@@ -73,13 +86,19 @@ export const NotificationsPage: React.FC = () => {
           </p>
         </div>
 
-        {unreadCount > 0 && (
+        {env.VITE_USE_MOCKS && unreadCount > 0 && (
           <Button variant="secondary" size="sm" onClick={handleMarkAllRead}>
             <Check className="w-4 h-4 mr-1.5" />
             <span>Mark all as read</span>
           </Button>
         )}
       </div>
+
+      {!env.VITE_USE_MOCKS && unreadCount > 0 && (
+        <p className="text-xs text-moss">
+          Notifications are read-only in the connected backend; unread status is preserved.
+        </p>
+      )}
 
       {isLoading ? (
         <div className="space-y-3">

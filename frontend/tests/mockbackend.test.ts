@@ -37,6 +37,29 @@ describe('Mock Backend Implementation', () => {
     expect(sqlScoreAfter).toBe(sqlScoreBefore);
   });
 
+  it('returns public credentials only for fields enabled by student visibility settings', async () => {
+    const backend = new MockBackend();
+    const credential = await backend.student.getPublicCredential('APT-8924-ARV');
+    expect(credential?.credential_id).toBe('APT-8924-ARV');
+    expect(credential?.display_name).toBe('Aarav Sharma');
+    expect(credential?.skills.length).toBeGreaterThan(0);
+    expect(credential?.shared_fields).toContain('scores');
+
+    await backend.student.updateVisibility('user-aarav', {
+      public_skills: false,
+      public_levels: false,
+      public_scores: false,
+      public_name: false,
+      public_university: false,
+      discovery_opt_in: false,
+    });
+    const privateCredential = await backend.student.getPublicCredential('APT-8924-ARV');
+    expect(privateCredential?.display_name).toBeUndefined();
+    expect(privateCredential?.affiliation).toBeUndefined();
+    expect(privateCredential?.skills).toEqual([]);
+    expect(await backend.student.getPublicCredential('not-a-credential')).toBeNull();
+  });
+
   it('rejects submission with missing skills', async () => {
     const backend = new MockBackend();
     const draft = await backend.submissions.saveDraft({

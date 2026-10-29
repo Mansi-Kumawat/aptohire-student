@@ -41,7 +41,7 @@ export function useProjects() {
       status,
     }: {
       assignmentId: string;
-      status: 'assigned' | 'in_progress' | 'submitted' | 'completed';
+      status: 'in_progress';
     }) => backend.projects.updateAssignmentStatus(assignmentId, status),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assignments', studentId] });

@@ -11,6 +11,7 @@ import {
   ProjectAssignment,
   ProjectBrief,
   PublicConfig,
+  PublicCredential,
   SkillEdge,
   SkillItem,
   SkillScore,
@@ -65,6 +66,7 @@ export interface Backend {
     onAuthStateChange(callback: (user: AuthUser | null) => void): () => void;
   };
   student: {
+    getPublicCredential(credentialId: string): Promise<PublicCredential | null>;
     getProfile(studentId: string): Promise<StudentProfile>;
     updateProfile(studentId: string, updates: Partial<StudentProfile>): Promise<StudentProfile>;
     uploadAvatar(studentId: string, blob: Blob): Promise<{ avatar_url: string }>;
@@ -108,7 +110,7 @@ export interface Backend {
     }): Promise<{ assignment_id: string; brief: ProjectBrief }>;
     updateAssignmentStatus(
       assignmentId: string,
-      status: 'assigned' | 'in_progress' | 'submitted' | 'completed'
+      status: 'in_progress'
     ): Promise<ProjectAssignment>;
   };
   submissions: {

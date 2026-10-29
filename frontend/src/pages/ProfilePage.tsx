@@ -474,7 +474,7 @@ export const ProfilePage: React.FC = () => {
                     </p>
                     <div className="flex flex-wrap items-center gap-2 text-xs text-moss">
                       <StatusChip kind="verified-university" />
-                      <span>Level: {prop.program_level.toUpperCase()}</span>
+                      <span>Level: {prop.program_level?.toUpperCase() ?? '—'}</span>
                       <span>Year: {prop.year}</span>
                     </div>
                   </div>
@@ -529,7 +529,7 @@ export const ProfilePage: React.FC = () => {
                       )}
                     </div>
                     <div className="flex items-center gap-2 text-xs text-moss">
-                      <span className="capitalize">{aff.program_level}</span>
+                      <span className="capitalize">{aff.program_level ?? '—'}</span>
                       <span>·</span>
                       <span className="capitalize">{aff.status}</span>
                       {aff.year && <span>(Year {aff.year})</span>}
@@ -693,11 +693,11 @@ export const ProfilePage: React.FC = () => {
                           onClick={async () => {
                             if (!user) return;
                             await backend.sources.applyProposal(user.id, pIdx);
-                            loadAll();
-                            toast.success('Profile updated.');
+                            await loadAll();
+                            toast.success('Suggestion approved.');
                           }}
                         >
-                          Add
+                          Approve
                         </Button>
                         <Button
                           variant="ghost"

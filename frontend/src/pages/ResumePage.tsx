@@ -197,7 +197,7 @@ export const ResumePage: React.FC = () => {
                 <View style={styles.timelineItem}>
                   <Text style={styles.timelineTitle}>{currentAff.university_name}</Text>
                   <Text style={styles.timelineSub}>
-                    {currentAff.program_level.toUpperCase()} · Status: {currentAff.status}{' '}
+                    {currentAff.program_level?.toUpperCase() ?? '—'} · Status: {currentAff.status}{' '}
                     {currentAff.year ? `(Year ${currentAff.year})` : ''} ·{' '}
                     {currentAff.is_verified ? 'Verified University' : 'Unregistered Institution'}
                   </Text>
@@ -356,7 +356,7 @@ export const ResumePage: React.FC = () => {
                   {currentAff.university_name}
                 </h4>
                 <p className="text-sm text-moss">
-                  {currentAff.program_level.toUpperCase()} · {currentAff.status}{' '}
+                  {currentAff.program_level?.toUpperCase() ?? '—'} · {currentAff.status}{' '}
                   {currentAff.year ? `(Year ${currentAff.year})` : ''}
                 </p>
               </div>

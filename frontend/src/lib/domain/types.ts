@@ -54,6 +54,8 @@ export interface Audit {
 }
 
 export interface ProfileProposal {
+  id?: string;
+  state?: 'pending' | 'approved' | 'dismissed';
   source: 'github' | 'linkedin_export';
   changes: {
     field:
@@ -104,7 +106,7 @@ export interface Affiliation {
   student_id: string;
   university_id?: string | null;
   university_name: string;
-  program_level: 'ug' | 'pg';
+  program_level?: 'ug' | 'pg';
   year?: number;
   status: 'incoming' | 'enrolled' | 'dropout' | 'alumni' | 'masters';
   is_verified: boolean;
@@ -119,7 +121,7 @@ export interface AffiliationProposal {
   student_id: string;
   university_id: string;
   university_name: string;
-  program_level: 'ug' | 'pg';
+  program_level?: 'ug' | 'pg';
   year: number;
   status: 'incoming' | 'enrolled' | 'dropout' | 'alumni' | 'masters';
   is_verified: boolean;
@@ -129,15 +131,18 @@ export interface AffiliationProposal {
 export interface UniversityPublic {
   id: string;
   name: string;
-  slug: string;
-  email_domains: string[];
+  slug?: string;
+  email_domains?: string[];
+  short_name?: string | null;
+  city?: string | null;
+  state?: string | null;
 }
 
 export interface SkillItem {
   id: string;
   name: string;
   slug: string;
-  family: 'Web/Frontend' | 'Backend' | 'Data' | 'Management/Commerce';
+  family: string;
   description?: string;
 }
 
@@ -304,6 +309,22 @@ export interface ProfileSource {
   consent_granted: boolean;
   auto_approve_proposals: boolean;
   last_synced_at?: string;
+}
+
+export interface PublicCredential {
+  credential_id: string;
+  issued_at: string;
+  last_updated: string;
+  display_name?: string;
+  affiliation?: { label: string; verification: 'roster' | 'student_id' | 'unverified' };
+  skills: {
+    name: string;
+    level: string;
+    verified: true;
+    score?: number;
+    verified_on?: string;
+  }[];
+  shared_fields: string[];
 }
 
 export interface PublicConfig {

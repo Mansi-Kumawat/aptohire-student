@@ -45,6 +45,7 @@ export const SubmissionPage: React.FC = () => {
   const [config, setConfig] = useState<PublicConfig | null>(null);
   const [skillsTaxonomy, setSkillsTaxonomy] = useState<SkillItem[]>([]);
   const [submissionId, setSubmissionId] = useState<string>(submissionIdParam || '');
+  const submissionIdRef = useRef<string>(submissionIdParam || '');
   const [documents, setDocuments] = useState<SubmissionDocument[]>([]);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
@@ -174,7 +175,7 @@ export const SubmissionPage: React.FC = () => {
     try {
       setAutosaveStatus('Saving draft…');
       const saved = await backend.submissions.saveDraft({
-        id: submissionId || undefined,
+        id: submissionIdRef.current || submissionId || undefined,
         student_id: user.id,
         assignment_id: assignmentIdParam || null,
         title: formValues.title,
@@ -193,9 +194,8 @@ export const SubmissionPage: React.FC = () => {
         ai_notes: formValues.ai_notes,
       });
 
-      if (!submissionId) {
-        setSubmissionId(saved.id);
-      }
+      submissionIdRef.current = saved.id;
+      if (submissionId !== saved.id) setSubmissionId(saved.id);
       setAutosaveStatus('Saved just now');
     } catch {
       setAutosaveStatus('Failed to save draft');
@@ -212,6 +212,35 @@ export const SubmissionPage: React.FC = () => {
       if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
     };
   }, [formValues.title, formValues.description, formValues.live_url, formValues.github_url, documents, performAutosave]);
+
+  const ensureSavedDraftId = async (): Promise<string> => {
+    if (!user) throw new Error('Sign in before uploading submission evidence.');
+    if (!formValues.title || formValues.title.trim().length < 2) {
+      throw new Error('Enter a project title before uploading evidence.');
+    }
+    const saved = await backend.submissions.saveDraft({
+      id: submissionIdRef.current || submissionId || undefined,
+      student_id: user.id,
+      assignment_id: assignmentIdParam || null,
+      title: formValues.title,
+      description: formValues.description,
+      skills_claimed: formValues.skills_claimed,
+      live_url: formValues.live_url || null,
+      github_url: formValues.github_url || null,
+      video_url: formValues.video_url || null,
+      video_duration_seconds: videoDuration || undefined,
+      video_size_bytes: videoFile?.size,
+      video_source: formValues.video_source,
+      documents,
+      originality_responses: formValues.originality_responses,
+      ai_used: formValues.ai_used,
+      ai_tools: formValues.ai_tools,
+      ai_notes: formValues.ai_notes,
+    });
+    submissionIdRef.current = saved.id;
+    setSubmissionId(saved.id);
+    return saved.id;
+  };
 
   // Video Selection & Validation
   const handleVideoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -246,8 +275,7 @@ export const SubmissionPage: React.FC = () => {
 
       // 3. Resumable upload (TUS)
       setVideoUploadProgress(10);
-      const subId = submissionId || `sub-${Date.now()}`;
-      setSubmissionId(subId);
+      const subId = await ensureSavedDraftId();
 
       const uploaded = await backend.uploads.uploadVideoTus(file, subId, (percent) => {
         setVideoUploadProgress(percent);
@@ -274,8 +302,13 @@ export const SubmissionPage: React.FC = () => {
       return;
     }
 
-    const subId = submissionId || `sub-${Date.now()}`;
-    setSubmissionId(subId);
+    let subId: string;
+    try {
+      subId = await ensureSavedDraftId();
+    } catch (error) {
+      setDocumentErrorMessage(error instanceof Error ? error.message : 'Save the draft before uploading documents.');
+      return;
+    }
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];

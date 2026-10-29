@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useBackend } from '@/lib/backend';
-import { StudentProfile, Affiliation, SkillScore } from '@/lib/domain/types';
+import { PublicCredential } from '@/lib/domain/types';
 import { StatusChip } from '@/components/proof/StatusChip';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -18,51 +18,35 @@ export const PublicVerifyPage: React.FC = () => {
   const { credentialId } = useParams<{ credentialId: string }>();
   const backend = useBackend();
 
-  const [profile, setProfile] = useState<StudentProfile | null>(null);
-  const [affiliations, setAffiliations] = useState<Affiliation[]>([]);
-  const [scores, setScores] = useState<SkillScore[]>([]);
+  const [credential, setCredential] = useState<PublicCredential | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     const loadVerification = async () => {
-      if (!credentialId) return;
+      if (!credentialId) {
+        setNotFound(true);
+        setIsLoading(false);
+        return;
+      }
       setIsLoading(true);
+      setNotFound(false);
       try {
-        // In mock mode or real backend, find student by credential ID
-        // The mock backend has profiles with credential IDs:
-        // APT-8924-ARV (Aarav), APT-1042-NAM (Naman), APT-4419-AVI (Avi), APT-6021-NIY (Niya)
-        const studentIdMap: Record<string, string> = {
-          'APT-8924-ARV': 'user-aarav',
-          'APT-1042-NAM': 'user-naman',
-          'APT-4419-AVI': 'user-avi',
-          'APT-6021-NIY': 'user-niya',
-        };
-
-        const resolvedStudentId = studentIdMap[credentialId] || 'user-aarav';
-
-        const [prof, affs, scs] = await Promise.all([
-          backend.student.getProfile(resolvedStudentId),
-          backend.affiliations.listAffiliations(resolvedStudentId),
-          backend.scores.listSkillScores(resolvedStudentId),
-        ]);
-
-        if (prof) {
-          setProfile(prof);
-          setAffiliations(affs);
-          setScores(scs.filter((s) => s.is_verified && !s.is_borderline));
-        } else {
-          setNotFound(true);
+        const result = await backend.student.getPublicCredential(credentialId);
+        if (!cancelled) {
+          setCredential(result);
+          setNotFound(!result);
         }
       } catch (err) {
         console.error(err);
-        setNotFound(true);
+        if (!cancelled) setNotFound(true);
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
-
-    loadVerification();
+    void loadVerification();
+    return () => { cancelled = true; };
   }, [backend, credentialId]);
 
   if (isLoading) {
@@ -74,7 +58,7 @@ export const PublicVerifyPage: React.FC = () => {
     );
   }
 
-  if (notFound || !profile) {
+  if (notFound || !credential) {
     return (
       <div className="min-h-screen bg-canvas flex flex-col justify-center items-center p-6 text-center">
         <ShieldCheck className="w-12 h-12 text-moss mb-3" />
@@ -89,13 +73,12 @@ export const PublicVerifyPage: React.FC = () => {
     );
   }
 
-  const verifiedScores = scores.filter((s) => s.is_verified);
-  const currentAff = affiliations.find((a) => a.is_current) || affiliations[0];
+  const verifiedScores = credential.skills;
 
   return (
     <div className="min-h-screen bg-mesh/50 antialiased py-12 px-4 sm:px-6 flex flex-col items-center justify-center">
       <Helmet>
-        <title>Credential {profile.credential_id} · AptoHire Verification</title>
+        <title>Credential {credential.credential_id} · AptoHire Verification</title>
         <meta name="robots" content="noindex, nofollow" />
       </Helmet>
 
@@ -115,14 +98,11 @@ export const PublicVerifyPage: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
             <div>
               <span className="text-[11px] font-mono uppercase tracking-wider text-moss font-semibold">
-                Issued Credential ID: {profile.credential_id}
+                Issued Credential ID: {credential.credential_id}
               </span>
               <h1 className="font-display font-bold text-2xl sm:text-3xl text-ink mt-1">
-                {profile.visibility.public_name ? profile.full_name : 'Verified Student'}
+                {credential.display_name || 'Verified Student'}
               </h1>
-              {profile.headline && (
-                <p className="text-sm text-moss mt-1">{profile.headline}</p>
-              )}
             </div>
 
             {verifiedScores.length > 0 ? (
@@ -135,13 +115,11 @@ export const PublicVerifyPage: React.FC = () => {
           </div>
 
           {/* Institutional Affiliation */}
-          {profile.visibility.public_university && currentAff && (
+          {credential.affiliation && (
             <div className="mt-4 pt-4 border-t border-hairline/80 flex items-center gap-2 text-xs text-moss font-medium">
               <GraduationCap className="w-4 h-4 text-verdant-700 shrink-0" />
-              <span>{currentAff.university_name}</span>
-              <span>·</span>
-              <span className="capitalize">{currentAff.status}</span>
-              {currentAff.is_verified && (
+              <span>{credential.affiliation.label}</span>
+              {credential.affiliation.verification !== 'unverified' && (
                 <StatusChip kind="verified-university" className="text-[11px] py-0 px-2 ml-1" />
               )}
             </div>
@@ -170,51 +148,24 @@ export const PublicVerifyPage: React.FC = () => {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {verifiedScores.map((score) => (
-                  <Link
-                    key={score.id}
-                    to={`/scorecard/${score.skill_slug}`}
-                    className="p-4 rounded-control border border-hairline bg-canvas hover:border-verdant-600 transition-all flex items-center justify-between group shadow-sm"
+                  <div
+                    key={score.name}
+                    className="p-4 rounded-control border border-hairline bg-canvas flex items-center justify-between shadow-sm"
                   >
-                    <div>
-                      <h3 className="font-semibold text-sm text-ink group-hover:text-verdant-700 transition-colors">
-                        {score.skill_name}
-                      </h3>
-                      <p className="text-xs text-moss">{score.family}</p>
-                    </div>
-
+                    <h3 className="font-semibold text-sm text-ink">{score.name}</h3>
                     <div className="flex items-center gap-2">
                       <StatusChip kind="verified" label={score.level} />
-                      {profile.visibility.public_scores && (
+                      {credential.shared_fields.includes('scores') && typeof score.score === 'number' && (
                         <span className="font-mono text-xs font-bold text-ink tabular-nums">
                           {score.score}/100
                         </span>
                       )}
-                      <ArrowRight className="w-4 h-4 text-moss group-hover:text-verdant-700 transition-colors ml-1" />
                     </div>
-                  </Link>
+                  </div>
                 ))}
               </div>
             )}
           </div>
-
-          {/* Target Skills / Interests */}
-          {profile.target_skills.length > 0 && (
-            <div className="pt-4 border-t border-hairline space-y-2">
-              <span className="text-xs font-semibold text-moss uppercase tracking-wider block">
-                Target Competencies (In Learning)
-              </span>
-              <div className="flex flex-wrap gap-2">
-                {profile.target_skills.map((skill) => (
-                  <span
-                    key={skill}
-                    className="px-2.5 py-1 rounded-full text-xs font-medium bg-mist text-ink border border-hairline"
-                  >
-                    {skill}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* Tamper-evident Audit Guarantee */}
           <div className="pt-4 border-t border-hairline flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-moss">
