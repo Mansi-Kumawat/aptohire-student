@@ -49,7 +49,11 @@ export type RegisterOutcome =
 export interface RegisterResult {
   student_id: string;
   outcome: RegisterOutcome;
-  affiliation?: Affiliation;
+  affiliation?: {
+    university_id?: string | null;
+    university_name: string;
+    verification_type: Affiliation['verification_type'];
+  };
   matched_existing_person: boolean;
 }
 

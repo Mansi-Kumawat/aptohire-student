@@ -51,14 +51,18 @@ const AuthenticatedShellWrapper: React.FC = () => {
   React.useEffect(() => {
     if (!user) return;
 
-    backend.notifications.listNotifications(user.id).then(setNotifications);
-    backend.student.getProfile(user.id).then((p) => {
-      setAvatarUrl(p.avatar_url || null);
-    });
-    backend.sharing.listAccessRequests(user.id).then((reqs) => {
-      const pending = reqs.filter((r) => r.status === 'pending').length;
-      setPendingRequestsCount(pending);
-    });
+    backend.notifications.listNotifications(user.id)
+      .then(setNotifications)
+      .catch(() => setNotifications([]));
+    backend.student.getProfile(user.id)
+      .then((profile) => setAvatarUrl(profile.avatar_url || null))
+      .catch(() => setAvatarUrl(null));
+    backend.sharing.listAccessRequests(user.id)
+      .then((requests) => {
+        const pending = requests.filter((request) => request.status === 'pending').length;
+        setPendingRequestsCount(pending);
+      })
+      .catch(() => setPendingRequestsCount(0));
 
     const unsubNotifs = backend.notifications.subscribeNotifications(
       user.id,

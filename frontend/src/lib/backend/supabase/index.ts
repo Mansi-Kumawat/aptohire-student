@@ -307,6 +307,13 @@ export class SupabaseBackend implements Backend {
       return {
         student_id: response.student_id,
         outcome: response.outcome,
+        ...(response.affiliation ? {
+          affiliation: {
+            ...(response.affiliation.university_id ? { university_id: response.affiliation.university_id } : {}),
+            university_name: response.affiliation.label,
+            verification_type: response.affiliation.verification,
+          },
+        } : {}),
         matched_existing_person: response.matched_existing_person,
       };
     },

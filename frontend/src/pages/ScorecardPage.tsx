@@ -23,29 +23,33 @@ export const ScorecardPage: React.FC = () => {
   const [skillEdges, setSkillEdges] = useState<SkillEdge[]>([]);
   const [config, setConfig] = useState<PublicConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadWarning, setLoadWarning] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
+    let cancelled = false;
     const load = async () => {
       setIsLoading(true);
-      try {
-        const [scs, sks, edges, cfg] = await Promise.all([
-          user ? backend.scores.listSkillScores(user.id) : [],
-          backend.skills.listSkills(),
-          backend.skills.listSkillEdges(),
-          backend.config.getPublicConfig(),
-        ]);
-        setScores(scs);
-        setAllSkills(sks);
-        setSkillEdges(edges);
-        setConfig(cfg);
-      } catch (err) {
-        console.error(err);
-      } finally {
+      setLoadWarning(false);
+      const results = await Promise.allSettled([
+        user ? backend.scores.listSkillScores(user.id) : Promise.resolve([]),
+        backend.skills.listSkills(),
+        backend.skills.listSkillEdges(),
+        backend.config.getPublicConfig(),
+      ]);
+      if (!cancelled) {
+        const [scs, sks, edges, cfg] = results;
+        setScores(scs.status === 'fulfilled' ? scs.value : []);
+        setAllSkills(sks.status === 'fulfilled' ? sks.value : []);
+        setSkillEdges(edges.status === 'fulfilled' ? edges.value : []);
+        setConfig(cfg.status === 'fulfilled' ? cfg.value : null);
+        setLoadWarning(results.some((result) => result.status === 'rejected'));
         setIsLoading(false);
       }
     };
-    load();
-  }, [backend, user]);
+    void load();
+    return () => { cancelled = true; };
+  }, [backend, user, retryCount]);
 
   // Group verified/assessed skills by family
   const families = ['Web/Frontend', 'Backend', 'Data', 'Management/Commerce'] as const;
@@ -84,6 +88,13 @@ export const ScorecardPage: React.FC = () => {
           </Link>
         </div>
       </div>
+
+      {loadWarning && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-hairline bg-mist px-4 py-3 text-sm text-moss">
+          <span>Some scorecard data could not be loaded. Retry to check again.</span>
+          <Button size="sm" variant="secondary" onClick={() => setRetryCount((count) => count + 1)}>Retry</Button>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="space-y-4">

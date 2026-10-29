@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { StatusChip } from '@/components/proof/StatusChip';
 import { Logo } from '@/components/brand/Logo';
 import { Helmet } from 'react-helmet-async';
-import { CheckCircle2, Search, ArrowRight, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Search, ArrowRight, ShieldCheck } from 'lucide-react';
 import { copy } from '@/content/copy';
 
 export const OnboardingPage: React.FC = () => {
@@ -20,6 +20,8 @@ export const OnboardingPage: React.FC = () => {
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [catalogWarning, setCatalogWarning] = useState(false);
 
   // Step 1: About you
   const [fullName, setFullName] = useState(user?.full_name || '');
@@ -49,8 +51,14 @@ export const OnboardingPage: React.FC = () => {
   const [targetRole, setTargetRole] = useState<string>('');
 
   useEffect(() => {
-    backend.affiliations.listUniversities().then(setUniversities);
-    backend.skills.listSkills().then(setAvailableSkills);
+    let cancelled = false;
+    backend.affiliations.listUniversities()
+      .then((items) => { if (!cancelled) setUniversities(items); })
+      .catch(() => { if (!cancelled) setCatalogWarning(true); });
+    backend.skills.listSkills()
+      .then((items) => { if (!cancelled) setAvailableSkills(items); })
+      .catch(() => { if (!cancelled) setCatalogWarning(true); });
+    return () => { cancelled = true; };
   }, [backend]);
 
   const getValidStatus = (): 'incoming' | 'enrolled' | 'dropout' | 'alumni' | 'masters' => {
@@ -63,6 +71,7 @@ export const OnboardingPage: React.FC = () => {
   // Handle Step 1 submit -> check roster detection
   const handleStep1Submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
     setIsLoading(true);
 
     try {
@@ -76,7 +85,7 @@ export const OnboardingPage: React.FC = () => {
 
       if (result.outcome === 'verified_roster') {
         setOutcomeState('verified_roster');
-        setMatchedUniName(result.affiliation?.university_name || 'Uni A');
+        setMatchedUniName(result.affiliation?.university_name || 'Your university');
       } else if (result.outcome === 'confirm_existing') {
         setOutcomeState('confirm_existing');
       } else {
@@ -84,8 +93,9 @@ export const OnboardingPage: React.FC = () => {
         setOutcomeState(null);
       }
       setStep(2);
-    } catch (err) {
-      console.error(err);
+    } catch {
+      setErrorMessage('We could not check the university roster just now. You can still choose a university or add an unlisted one.');
+      setOutcomeState(null);
       setStep(2);
     } finally {
       setIsLoading(false);
@@ -94,9 +104,18 @@ export const OnboardingPage: React.FC = () => {
 
   // Handle Student ID submit
   const handleVerifyStudentId = async () => {
-    const submittedStudentIdNumber = studentIdNumber;
+    if (!selectedUniId) {
+      setErrorMessage('Choose a registered university before verifying a student ID.');
+      return;
+    }
+    if (!studentIdNumber.trim()) {
+      setErrorMessage('Enter your student ID number to continue.');
+      return;
+    }
+    const submittedStudentIdNumber = studentIdNumber.trim();
     // Raw student IDs must not remain in component state after submission.
     setStudentIdNumber('');
+    setErrorMessage(null);
     setIsLoading(true);
     try {
       const result = await backend.auth.registerStudent({
@@ -112,11 +131,13 @@ export const OnboardingPage: React.FC = () => {
       });
 
       setOutcomeState(result.outcome);
-      if (result.outcome === 'verified_student_id') {
-        setMatchedUniName('Uni B (Beacon State University)');
+      if (result.affiliation?.university_name) {
+        setMatchedUniName(result.affiliation.university_name);
+      } else if (result.outcome === 'verified_student_id') {
+        setMatchedUniName(universities.find((uni) => uni.id === selectedUniId)?.name || 'Your university');
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      setErrorMessage('We could not complete verification. Check the ID and try again, or continue without verification.');
       setOutcomeState('roster_no_match');
     } finally {
       setIsLoading(false);
@@ -125,10 +146,20 @@ export const OnboardingPage: React.FC = () => {
 
   // Continue unverified
   const handleContinueUnverified = async () => {
+    const selectedUniversity = universities.find((uni) => uni.id === selectedUniId);
+    const uniName = customUniName.trim() || selectedUniversity?.name || '';
+    if (!uniName) {
+      setErrorMessage('Enter your university name or select a registered university first.');
+      return;
+    }
+    if (uniName.length > 160) {
+      setErrorMessage('University name must be 160 characters or fewer.');
+      return;
+    }
+    setErrorMessage(null);
     setIsLoading(true);
     try {
-      const uniName = customUniName || 'Independent University';
-      await backend.auth.registerStudent({
+      const result = await backend.auth.registerStudent({
         full_name: fullName,
         program_level: programLevel,
         year: parseInt(yearStatus, 10) || 1,
@@ -138,10 +169,13 @@ export const OnboardingPage: React.FC = () => {
           university_name: uniName,
         },
       });
-      setOutcomeState('unverified');
+      setOutcomeState(result.outcome);
       setMatchedUniName(uniName);
-    } catch (err) {
-      console.error(err);
+      if (result.outcome !== 'unverified') {
+        setErrorMessage('The affiliation could not be added as unverified. Please retry or contact support.');
+      }
+    } catch {
+      setErrorMessage('We could not add that university. Check your connection and try again.');
     } finally {
       setIsLoading(false);
     }
@@ -158,19 +192,21 @@ export const OnboardingPage: React.FC = () => {
 
   // Finish Onboarding
   const handleFinish = async () => {
+    if (!user) {
+      setErrorMessage('Your sign-in session expired. Please sign in again.');
+      return;
+    }
+    setErrorMessage(null);
     setIsLoading(true);
     try {
-      if (user) {
-        await backend.student.updateProfile(user.id, {
-          full_name: fullName,
-          target_skills: targetSkills,
-          target_roles: targetRole ? [targetRole] : [],
-        });
-      }
+      await backend.student.updateProfile(user.id, {
+        full_name: fullName.trim(),
+        target_skills: targetSkills,
+        target_roles: targetRole.trim() ? [targetRole.trim()] : [],
+      });
       navigate('/', { replace: true });
-    } catch (err) {
-      console.error(err);
-      navigate('/', { replace: true });
+    } catch {
+      setErrorMessage('Your details could not be saved yet. Please retry before leaving onboarding.');
     } finally {
       setIsLoading(false);
     }
@@ -189,11 +225,32 @@ export const OnboardingPage: React.FC = () => {
 
       {/* Header */}
       <div className="w-full max-w-xl mx-auto flex items-center justify-between pb-6">
-        <Logo showPortalBadge={true} />
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            aria-label={step === 1 ? 'Return to sign in' : 'Go to previous onboarding step'}
+            onClick={() => {
+              setErrorMessage(null);
+              if (step === 3) setStep(2);
+              else if (step === 2) setStep(1);
+              else navigate('/login');
+            }}
+            className="inline-flex items-center gap-1.5 rounded-control px-2.5 py-2 text-sm font-medium text-moss hover:text-ink hover:bg-mist focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-verdant-600"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span className="hidden sm:inline">{step === 1 ? 'Exit' : 'Back'}</span>
+          </button>
+          <Logo showPortalBadge={true} />
+        </div>
         <span className="text-xs font-semibold text-moss">Step {step} of 3</span>
       </div>
 
       <div className="w-full max-w-xl mx-auto my-auto py-6">
+        {errorMessage && (
+          <div role="alert" className="mb-5 rounded-control border border-ember-300 bg-ember-50 px-4 py-3 text-sm text-ember-700">
+            {errorMessage}
+          </div>
+        )}
         {/* STEP 1: ABOUT YOU */}
         {step === 1 && (
           <div className="space-y-6">
@@ -270,6 +327,11 @@ export const OnboardingPage: React.FC = () => {
                 We verify your university status without compromising your privacy
               </p>
             </div>
+            {catalogWarning && (
+              <div role="status" className="rounded-control border border-hairline bg-mist px-4 py-3 text-sm text-moss">
+                The university or skills list could not be loaded. You can still add an unlisted university and continue.
+              </div>
+            )}
 
             {/* Case 1: Verified via email domain roster */}
             {outcomeState === 'verified_roster' && (
@@ -283,6 +345,22 @@ export const OnboardingPage: React.FC = () => {
                 <p className="text-sm text-moss leading-relaxed">
                   Your email matched the enrolled student roster provided by your university.
                   Your affiliation badge is verified.
+                </p>
+                <Button variant="primary" size="lg" onClick={() => setStep(3)} className="w-full">
+                  <span>Continue to target skills</span>
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
+              </div>
+            )}
+
+            {outcomeState === 'confirm_existing' && (
+              <div className="p-6 rounded-panel border border-hairline bg-canvas space-y-4">
+                <div className="flex items-center gap-2">
+                  <StatusChip kind="unverified-university" label="Existing affiliation needs confirmation" />
+                </div>
+                <h3 className="font-display font-semibold text-lg text-ink">We found an existing student record</h3>
+                <p className="text-sm text-moss leading-relaxed">
+                  Your current profile and scores have not been changed. Finish onboarding now; you can review the university proposal from your Profile page.
                 </p>
                 <Button variant="primary" size="lg" onClick={() => setStep(3)} className="w-full">
                   <span>Continue to target skills</span>
@@ -345,6 +423,7 @@ export const OnboardingPage: React.FC = () => {
                     Student ID verification
                   </h3>
                   <p className="text-xs text-moss leading-relaxed">
+                    Selected university: <strong>{universities.find((uni) => uni.id === selectedUniId)?.name || 'Registered university'}</strong>.
                     Enter your student ID. We store only a secure hash. Never upload an ID card.
                   </p>
                 </div>
@@ -355,7 +434,10 @@ export const OnboardingPage: React.FC = () => {
                     autoComplete="off"
                     placeholder="e.g. B-1042"
                     value={studentIdNumber}
-                    onChange={(e) => setStudentIdNumber(e.target.value)}
+                    onChange={(e) => {
+                      setStudentIdNumber(e.target.value);
+                      setErrorMessage(null);
+                    }}
                   />
                 </Field>
 
@@ -373,11 +455,24 @@ export const OnboardingPage: React.FC = () => {
                     type="button"
                     variant="secondary"
                     onClick={handleContinueUnverified}
+                    isLoading={isLoading}
                     className="flex-1"
                   >
                     Continue without verifying
                   </Button>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOutcomeState(null);
+                    setSelectedUniId('');
+                    setStudentIdNumber('');
+                    setErrorMessage(null);
+                  }}
+                  className="text-sm font-medium text-verdant-700 hover:underline"
+                >
+                  Choose a different university
+                </button>
               </div>
             )}
 
@@ -402,6 +497,7 @@ export const OnboardingPage: React.FC = () => {
                       key={uni.id}
                       type="button"
                       onClick={() => {
+                        setErrorMessage(null);
                         setSelectedUniId(uni.id);
                         setOutcomeState('needs_student_id');
                       }}
@@ -421,13 +517,17 @@ export const OnboardingPage: React.FC = () => {
                     <Input
                       placeholder="Enter university name"
                       value={customUniName}
-                      onChange={(e) => setCustomUniName(e.target.value)}
+                      onChange={(e) => {
+                        setCustomUniName(e.target.value);
+                        setErrorMessage(null);
+                      }}
                     />
                     <Button
                       type="button"
                       variant="secondary"
                       onClick={handleContinueUnverified}
-                      disabled={!customUniName.trim()}
+                      disabled={!customUniName.trim() || isLoading}
+                      isLoading={isLoading}
                     >
                       Add
                     </Button>

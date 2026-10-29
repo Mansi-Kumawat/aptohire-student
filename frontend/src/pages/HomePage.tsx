@@ -61,6 +61,9 @@ export const HomePage: React.FC = () => {
   const [proposals, setProposals] = useState<AffiliationProposal[]>([]);
   const [config, setConfig] = useState<PublicConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [dataWarning, setDataWarning] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
 
   // Interactive dashboard state
   const [skillFilter, setSkillFilter] = useState<'all' | 'verified' | 'review'>('all');
@@ -79,12 +82,23 @@ export const HomePage: React.FC = () => {
   const [grantSuccess, setGrantSuccess] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     const load = async () => {
-      if (!user) return;
       setIsLoading(true);
+      setLoadError(false);
+      setDataWarning(false);
+      if (!user) {
+        setLoadError(true);
+        setIsLoading(false);
+        return;
+      }
       try {
-        const [prof, affs, scs, reqs, asgs, subs, props, cfg] = await Promise.all([
-          backend.student.getProfile(user.id),
+        // Load the essential profile first so one optional endpoint cannot blank the page.
+        const prof = await backend.student.getProfile(user.id);
+        if (cancelled) return;
+        setProfile(prof);
+
+        const results = await Promise.allSettled([
           backend.affiliations.listAffiliations(user.id),
           backend.scores.listSkillScores(user.id),
           backend.sharing.listAccessRequests(user.id),
@@ -93,22 +107,25 @@ export const HomePage: React.FC = () => {
           backend.affiliations.listProposals(user.id),
           backend.config.getPublicConfig(),
         ]);
-        setProfile(prof);
-        setAffiliations(affs);
-        setSkills(scs);
-        setRequests(reqs);
-        setAssignments(asgs);
-        setSubmissions(subs);
-        setProposals(props);
-        setConfig(cfg);
-      } catch (err) {
-        console.error(err);
+        if (cancelled) return;
+        const [affs, scs, reqs, asgs, subs, props, cfg] = results;
+        setAffiliations(affs.status === 'fulfilled' ? affs.value : []);
+        setSkills(scs.status === 'fulfilled' ? scs.value : []);
+        setRequests(reqs.status === 'fulfilled' ? reqs.value : []);
+        setAssignments(asgs.status === 'fulfilled' ? asgs.value : []);
+        setSubmissions(subs.status === 'fulfilled' ? subs.value : []);
+        setProposals(props.status === 'fulfilled' ? props.value : []);
+        setConfig(cfg.status === 'fulfilled' ? cfg.value : null);
+        setDataWarning(results.some((result) => result.status === 'rejected'));
+      } catch {
+        if (!cancelled) setLoadError(true);
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
-    load();
-  }, [backend, user]);
+    void load();
+    return () => { cancelled = true; };
+  }, [backend, user, retryCount]);
 
   // Generate QR Code for sharing modal
   useEffect(() => {
@@ -122,7 +139,7 @@ export const HomePage: React.FC = () => {
 
 
 
-  if (isLoading || !profile) {
+  if (isLoading) {
     return (
       <div className="space-y-6 antialiased pb-12 animate-pulse">
         <Skeleton className="h-32 w-full rounded-panel" />
@@ -134,6 +151,19 @@ export const HomePage: React.FC = () => {
         </div>
         <Skeleton className="h-64 w-full rounded-panel" />
       </div>
+    );
+  }
+
+  if (loadError || !profile) {
+    return (
+      <section className="max-w-3xl mx-auto rounded-panel border border-hairline bg-canvas p-6 sm:p-8 shadow-sm">
+        <h1 className="font-display font-bold text-xl text-ink">Your student profile could not be loaded</h1>
+        <p className="mt-2 text-sm text-moss">If you just created your account, finish onboarding first. Otherwise check your connection and retry.</p>
+        <div className="mt-5 flex flex-wrap gap-3">
+          <Button variant="primary" onClick={() => setRetryCount((count) => count + 1)}>Retry</Button>
+          <Link to="/onboarding"><Button variant="secondary">Continue onboarding</Button></Link>
+        </div>
+      </section>
     );
   }
 
@@ -221,6 +251,12 @@ export const HomePage: React.FC = () => {
         <title>Home · AptoHire Student</title>
         <meta name="robots" content="noindex, nofollow" />
       </Helmet>
+
+      {dataWarning && (
+        <div role="status" className="rounded-control border border-hairline bg-mist px-4 py-3 text-sm text-moss">
+          Your profile loaded, but some dashboard information is temporarily unavailable.
+        </div>
+      )}
 
       {/* WELCOME BACK SECTION: MODERN CARD VERSION WITH TOP-TIER UI/UX */}
       <div

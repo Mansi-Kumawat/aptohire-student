@@ -59,6 +59,8 @@ export const ProfilePage: React.FC = () => {
   const [universities, setUniversities] = useState<UniversityPublic[]>([]);
   const [scores, setScores] = useState<SkillScore[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [loadWarning, setLoadWarning] = useState(false);
 
   // Edit State
   const [overviewSavedNotice, setOverviewSavedNotice] = useState(false);
@@ -85,11 +87,18 @@ export const ProfilePage: React.FC = () => {
   }, [tabParam]);
 
   const loadAll = React.useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      setLoadError(true);
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
+    setLoadError(false);
+    setLoadWarning(false);
     try {
-      const [prof, affs, props, srcs, sProps, unis, scs] = await Promise.all([
-        backend.student.getProfile(user.id),
+      const prof = await backend.student.getProfile(user.id);
+      setProfile(prof);
+      const results = await Promise.allSettled([
         backend.affiliations.listAffiliations(user.id),
         backend.affiliations.listProposals(user.id),
         backend.sources.listSources(user.id),
@@ -97,15 +106,16 @@ export const ProfilePage: React.FC = () => {
         backend.affiliations.listUniversities(),
         backend.scores.listSkillScores(user.id),
       ]);
-      setProfile(prof);
-      setAffiliations(affs);
-      setProposals(props);
-      setSources(srcs);
-      setSourceProposals(sProps);
-      setUniversities(unis);
-      setScores(scs);
-    } catch (err) {
-      console.error(err);
+      const [affs, props, srcs, sourceProps, unis, scs] = results;
+      setAffiliations(affs.status === 'fulfilled' ? affs.value : []);
+      setProposals(props.status === 'fulfilled' ? props.value : []);
+      setSources(srcs.status === 'fulfilled' ? srcs.value : []);
+      setSourceProposals(sourceProps.status === 'fulfilled' ? sourceProps.value : []);
+      setUniversities(unis.status === 'fulfilled' ? unis.value : []);
+      setScores(scs.status === 'fulfilled' ? scs.value : []);
+      setLoadWarning(results.some((result) => result.status === 'rejected'));
+    } catch {
+      setLoadError(true);
     } finally {
       setIsLoading(false);
     }
@@ -218,12 +228,22 @@ export const ProfilePage: React.FC = () => {
     await backend.student.updateVisibility(user.id, updated);
   };
 
-  if (isLoading || !profile) {
+  if (isLoading) {
     return (
       <div className="max-w-4xl mx-auto space-y-4 py-8">
         <Skeleton className="h-10 w-48" />
         <Skeleton className="h-40 w-full" />
       </div>
+    );
+  }
+
+  if (loadError || !profile) {
+    return (
+      <section className="max-w-3xl mx-auto rounded-panel border border-hairline bg-canvas p-6 sm:p-8 shadow-sm">
+        <h1 className="font-display font-bold text-xl text-ink">Your profile could not be loaded</h1>
+        <p className="mt-2 text-sm text-moss">Check that onboarding is complete and retry. If this continues, the Student profile may not have been created in the backend.</p>
+        <Button className="mt-5" variant="primary" onClick={() => void loadAll()}>Retry</Button>
+      </section>
     );
   }
 
@@ -246,6 +266,12 @@ export const ProfilePage: React.FC = () => {
         <title>Student Profile · AptoHire</title>
         <meta name="robots" content="noindex, nofollow" />
       </Helmet>
+
+      {loadWarning && (
+        <div role="status" className="rounded-control border border-hairline bg-mist px-4 py-3 text-sm text-moss">
+          Your profile loaded, but some optional details are temporarily unavailable.
+        </div>
+      )}
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-hairline pb-4">

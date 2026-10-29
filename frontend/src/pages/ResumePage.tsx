@@ -22,41 +22,57 @@ export const ResumePage: React.FC = () => {
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [dataWarning, setDataWarning] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
+    let cancelled = false;
     const load = async () => {
-      if (!user) return;
       setIsLoading(true);
+      setLoadError(false);
+      setDataWarning(false);
+      if (!user) {
+        setLoadError(true);
+        setIsLoading(false);
+        return;
+      }
       try {
-        const [prof, affs, scs] = await Promise.all([
-          backend.student.getProfile(user.id),
+        const prof = await backend.student.getProfile(user.id);
+        if (cancelled) return;
+        setProfile(prof);
+
+        const [affiliationResult, scoreResult] = await Promise.allSettled([
           backend.affiliations.listAffiliations(user.id),
           backend.scores.listSkillScores(user.id),
         ]);
-        setProfile(prof);
+        if (cancelled) return;
+        const affs = affiliationResult.status === 'fulfilled' ? affiliationResult.value : [];
+        const scs = scoreResult.status === 'fulfilled' ? scoreResult.value : [];
         setAffiliations(affs);
-        // Exclude borderline / under-review scores
-        setScores(scs.filter((s) => s.is_verified && !s.is_borderline));
+        setScores(scs.filter((score) => score.is_verified && !score.is_borderline));
+        setDataWarning(affiliationResult.status === 'rejected' || scoreResult.status === 'rejected');
 
-        // Generate QR Code data URL
-        const verifyLink = rootUrl(`/verify/${prof.credential_id}`);
-        const dataUrl = await QRCode.toDataURL(verifyLink, {
-          margin: 1,
-          width: 140,
-          color: {
-            dark: '#17261E',
-            light: '#FFFFFF',
-          },
-        });
-        setQrCodeDataUrl(dataUrl);
-      } catch (err) {
-        console.error(err);
+        try {
+          const verifyLink = rootUrl(`/verify/${prof.credential_id}`);
+          const dataUrl = await QRCode.toDataURL(verifyLink, {
+            margin: 1,
+            width: 140,
+            color: { dark: '#17261E', light: '#FFFFFF' },
+          });
+          if (!cancelled) setQrCodeDataUrl(dataUrl);
+        } catch {
+          if (!cancelled) setDataWarning(true);
+        }
+      } catch {
+        if (!cancelled) setLoadError(true);
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
-    load();
-  }, [backend, user]);
+    void load();
+    return () => { cancelled = true; };
+  }, [backend, user, retryCount]);
 
   const handleDownloadPdf = async () => {
     if (!profile) return;
@@ -256,12 +272,25 @@ export const ResumePage: React.FC = () => {
     window.print();
   };
 
-  if (isLoading || !profile) {
+  if (isLoading) {
     return (
       <div className="max-w-3xl mx-auto space-y-6 py-6">
         <Skeleton className="h-10 w-48" />
         <Skeleton className="h-64 w-full" />
       </div>
+    );
+  }
+
+  if (loadError || !profile) {
+    return (
+      <section className="max-w-3xl mx-auto rounded-panel border border-hairline bg-canvas p-6 sm:p-8 shadow-sm">
+        <h1 className="font-display font-bold text-xl text-ink">Your resume could not be loaded</h1>
+        <p className="mt-2 text-sm text-moss">Check that your Student profile is complete, then retry.</p>
+        <div className="mt-5 flex flex-wrap gap-3">
+          <Button variant="primary" onClick={() => setRetryCount((count) => count + 1)}>Retry</Button>
+          <Link to="/profile"><Button variant="secondary">Open profile</Button></Link>
+        </div>
+      </section>
     );
   }
 
@@ -274,6 +303,12 @@ export const ResumePage: React.FC = () => {
         <title>Digital Resume · {profile.full_name}</title>
         <meta name="robots" content="noindex, nofollow" />
       </Helmet>
+
+      {dataWarning && (
+        <div role="status" className="rounded-control border border-hairline bg-mist px-4 py-3 text-sm text-moss">
+          Some resume details could not be loaded. Your profile is still available below.
+        </div>
+      )}
 
       {/* Action Toolbar (Hidden in Print) */}
       <div className="no-print">
