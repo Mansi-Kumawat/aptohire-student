@@ -44,10 +44,11 @@ export const DemoAccountsPanel: React.FC<DemoAccountsPanelProps> = ({
     },
   ];
 
+  // Keep role-guard shortcuts aligned with Auth fixtures provisioned by backend/supabase/seed.sql.
   const roleGuardAccounts = [
-    { name: 'University Staff', email: 'uni-staff@unia.edu.test', role: 'university' },
-    { name: 'Org Recruiter', email: 'recruiter@northwind.test', role: 'organization' },
-    { name: 'Admin Account', email: 'admin@aptohire.test', role: 'admin' },
+    { name: 'University Staff', email: 'tpo@unia.edu.test', role: 'university' },
+    { name: 'Org Recruiter', email: 'recruiter@orga.demo.test', role: 'organization' },
+    { name: 'Admin Account', email: 'admin@demo.aptohire.test', role: 'admin' },
   ];
 
   return (
